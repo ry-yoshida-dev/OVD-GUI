@@ -1,23 +1,27 @@
-from pathlib import Path
-
 import numpy as np
 import pytest
 from open_vocabulary_detector import PromptKind, TextQuery, VisualQuery
 from PIL import Image
 
-from ovd_gui.detection import LabeledPrompt, ReferenceBoard, ReferenceBox
+from ovd_gui.detection import LabeledPrompt, ReferenceBoard, ReferenceBox, ReferenceImage
 from ovd_gui.vocabulary import ClassDefinition
 
 ALL_KINDS: frozenset[PromptKind] = frozenset({PromptKind.TEXT, PromptKind.VISUAL})
 TEXT_ONLY: frozenset[PromptKind] = frozenset({PromptKind.TEXT})
 
 
-def _box(class_name: str, image_path: Path = Path("a.jpg"), left: float = 10.0) -> ReferenceBox:
-    return ReferenceBox(image_path=image_path, class_name=class_name, left=left, top=10.0, right=50.0, bottom=40.0)
-
-
 def _image() -> Image.Image:
     return Image.new("RGB", (100, 80))
+
+
+def _reference(name: str = "a.jpg") -> ReferenceImage:
+    return ReferenceImage.of(name, _image())
+
+
+def _box(class_name: str, image_name: str = "a.jpg", left: float = 10.0) -> ReferenceBox:
+    return ReferenceBox(
+        reference_image=_reference(image_name), class_name=class_name, left=left, top=10.0, right=50.0, bottom=40.0
+    )
 
 
 def _classes(*texts: str) -> tuple[ClassDefinition, ...]:
@@ -26,14 +30,14 @@ def _classes(*texts: str) -> tuple[ClassDefinition, ...]:
 
 def test_box_without_area_is_rejected() -> None:
     with pytest.raises(ValueError):
-        ReferenceBox(image_path=Path("a.jpg"), class_name="cat", left=10.0, top=10.0, right=10.0, bottom=40.0)
+        ReferenceBox(reference_image=_reference(), class_name="cat", left=10.0, top=10.0, right=10.0, bottom=40.0)
 
 
 def test_box_outside_image_is_rejected() -> None:
     board: ReferenceBoard = ReferenceBoard()
     with pytest.raises(ValueError):
         board.add(
-            ReferenceBox(image_path=Path("a.jpg"), class_name="cat", left=0, top=0, right=101, bottom=10), _image()
+            ReferenceBox(reference_image=_reference(), class_name="cat", left=0, top=0, right=101, bottom=10), _image()
         )
 
 
@@ -48,7 +52,7 @@ def test_each_reference_image_is_one_visual_query_after_the_phrases() -> None:
     board: ReferenceBoard = ReferenceBoard()
     board.add(_box("car"), _image())
     board.add(_box("car", left=20.0), _image())
-    board.add(_box("car", image_path=Path("b.jpg")), _image())
+    board.add(_box("car", image_name="b.jpg"), _image())
     labeled_prompt: LabeledPrompt = board.build_prompt(_classes("car: suv", "dog"), ALL_KINDS)
     queries = labeled_prompt.prompt.queries
     assert labeled_prompt.query_labels == ("suv", "a.jpg", "b.jpg", "dog")
@@ -75,6 +79,15 @@ def test_class_without_usable_query_is_rejected() -> None:
         board.build_prompt(_classes("cup:"), ALL_KINDS)
 
 
+def test_reference_only_classes_are_listed_only_without_visual_support() -> None:
+    board: ReferenceBoard = ReferenceBoard()
+    board.add(_box("mug"), _image())
+    board.add(_box("car"), _image())
+    definitions: tuple[ClassDefinition, ...] = _classes("mug:", "car: suv", "cup:")
+    assert board.reference_only_classes(definitions, TEXT_ONLY) == ("mug",)
+    assert board.reference_only_classes(definitions, ALL_KINDS) == ()
+
+
 def test_unchanged_references_are_reused_and_changed_ones_rebuilt() -> None:
     board: ReferenceBoard = ReferenceBoard()
     board.add(_box("cat"), _image())
@@ -97,14 +110,14 @@ def test_boxes_follow_renames_and_removed_classes() -> None:
 
 def test_reference_images_are_listed_and_removed_per_class() -> None:
     board: ReferenceBoard = ReferenceBoard()
-    board.add(_box("cat", image_path=Path("b.jpg")), _image())
+    board.add(_box("cat", image_name="b.jpg"), _image())
     board.add(_box("cat"), _image())
-    board.add(_box("cat", image_path=Path("b.jpg"), left=20.0), _image())
+    board.add(_box("cat", image_name="b.jpg", left=20.0), _image())
     board.add(_box("dog"), _image())
-    assert board.reference_images_of("cat") == (Path("b.jpg"), Path("a.jpg"))
-    assert len(board.boxes_of("cat", Path("b.jpg"))) == 2
-    board.remove_reference_image("cat", Path("b.jpg"))
-    assert board.reference_images_of("cat") == (Path("a.jpg"),)
+    assert board.reference_images_of("cat") == (_reference("b.jpg"), _reference())
+    assert len(board.boxes_of("cat", _reference("b.jpg"))) == 2
+    board.remove_reference_image("cat", _reference("b.jpg"))
+    assert board.reference_images_of("cat") == (_reference(),)
     board.clear()
     assert board.is_empty
 
@@ -112,7 +125,7 @@ def test_reference_images_are_listed_and_removed_per_class() -> None:
 def test_reference_image_moves_to_another_class() -> None:
     board: ReferenceBoard = ReferenceBoard()
     board.add(_box("car"), _image())
-    board.add(_box("car", image_path=Path("b.jpg")), _image())
-    board.move_reference_image("car", Path("a.jpg"), "truck")
-    assert board.reference_images_of("car") == (Path("b.jpg"),)
-    assert board.reference_images_of("truck") == (Path("a.jpg"),)
+    board.add(_box("car", image_name="b.jpg"), _image())
+    board.move_reference_image("car", _reference(), "truck")
+    assert board.reference_images_of("car") == (_reference("b.jpg"),)
+    assert board.reference_images_of("truck") == (_reference(),)

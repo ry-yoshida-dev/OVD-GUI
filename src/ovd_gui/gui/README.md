@@ -6,14 +6,14 @@ PySide6 widgets of the application. `MainWindow` composes the sidebar (model, cl
 the detection table, and reacts to the outcomes reported by `DetectionRunner`, which runs inference on a separate
 `QThread`. Only `MainWindow` is exported; the sub-packages are imported by their own path.
 
-Sub-packages depend on the domain packages (`detection`, `vocabulary`, `preset`, `export`, `media`) and on
+Sub-packages depend on the domain packages (`detection`, `vocabulary`, `storage`, `preset`, `export`, `media`) and on
 `class_palette`, never on each other, except `prompt` using `viewer` for its box-drawing dialog.
 
 ## Components
 
 | Component | Description |
 | --------- | ----------- |
-| [main_window.py](./main_window.py) | `MainWindow`: layout, toolbar, stored results per image, Detect All and export, drag and drop. |
+| [main_window.py](./main_window.py) | `MainWindow`: layout, toolbar, stored results per model and image, switching the shown model, background detection of the shown image, background Detect All and export, drag and drop. |
 | [class_palette.py](./class_palette.py) | `ClassPalette`: stable color per class id, shared by every view. |
 | [export_dialog.py](./export_dialog.py) | `ExportDialog`: format, output directory and confidence choice for detecting every image and exporting. |
 | [prompt/](./prompt/README.md) | Class editor: classes, phrases and reference images, class sets. |

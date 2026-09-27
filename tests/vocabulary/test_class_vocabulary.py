@@ -18,9 +18,9 @@ def test_adding_an_existing_name_extends_its_phrases() -> None:
 
 def test_a_phrase_can_query_only_one_class() -> None:
     vocabulary: ClassVocabulary = _vocabulary("car: car, van")
-    with pytest.raises(ValueError, match="already queries the class 'car'"):
+    with pytest.raises(ValueError, match="is already a prompt of the class 'car'"):
         vocabulary.add(ClassDefinition.named("Van"))
-    with pytest.raises(ValueError, match="already queries"):
+    with pytest.raises(ValueError, match="is already a prompt"):
         vocabulary.add(ClassDefinition.parse("truck: truck, van"))
     assert vocabulary.class_names == ("car",)
 
@@ -37,11 +37,11 @@ def test_rename_class_and_phrase_keep_the_rules() -> None:
     assert vocabulary.classes[0] == ClassDefinition.named("kitten")
     with pytest.raises(ValueError, match="already exists"):
         vocabulary.rename_class(0, "DOG")
-    with pytest.raises(ValueError, match="already queries"):
+    with pytest.raises(ValueError, match="is already a prompt"):
         vocabulary.rename_class(0, "puppy")
     vocabulary.rename_phrase(1, 1, "hound")
     assert vocabulary.classes[1].text_queries == ("dog", "hound")
-    with pytest.raises(ValueError, match="already queries"):
+    with pytest.raises(ValueError, match="is already a prompt"):
         vocabulary.rename_phrase(1, 1, "Kitten")
     assert vocabulary.classes[1].text_queries == ("dog", "hound")
 

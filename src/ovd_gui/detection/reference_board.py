@@ -1,5 +1,4 @@
-from collections.abc import Sequence
-from pathlib import Path
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 from geometry import Box2DFormat, Boxes2D
@@ -9,8 +8,9 @@ from PIL import Image
 from ..vocabulary import ClassDefinition
 from .labeled_prompt import LabeledPrompt
 from .reference_box import ReferenceBox
+from .reference_image import ReferenceImage
 
-type ReferenceSignature = tuple[str, Path, tuple[tuple[float, float, float, float], ...]]
+type ReferenceSignature = tuple[str, ReferenceImage, tuple[tuple[float, float, float, float], ...]]
 
 
 class ReferenceBoard:
@@ -25,7 +25,7 @@ class ReferenceBoard:
 
     def __init__(self) -> None:
         self._boxes: list[ReferenceBox] = []
-        self._images: dict[Path, Image.Image] = {}
+        self._images: dict[ReferenceImage, Image.Image] = {}
         self._references: dict[ReferenceSignature, VisualReference] = {}
 
     @property
@@ -52,7 +52,19 @@ class ReferenceBoard:
         """
         return not self._boxes
 
-    def reference_images_of(self, class_name: str) -> tuple[Path, ...]:
+    @property
+    def reference_images(self) -> tuple[ReferenceImage, ...]:
+        """
+        Every image holding a box.
+
+        Returns
+        -------
+        tuple[ReferenceImage, ...]
+            Images in the order their first box was added.
+        """
+        return tuple(dict.fromkeys(box.reference_image for box in self._boxes))
+
+    def reference_images_of(self, class_name: str) -> tuple[ReferenceImage, ...]:
         """
         Reference images of one class, each one visual query.
 
@@ -63,12 +75,35 @@ class ReferenceBoard:
 
         Returns
         -------
-        tuple[Path, ...]
+        tuple[ReferenceImage, ...]
             Images holding boxes of the class, in the order their first box was added.
         """
-        return tuple(dict.fromkeys(box.image_path for box in self._boxes if box.class_name == class_name))
+        return tuple(dict.fromkeys(box.reference_image for box in self._boxes if box.class_name == class_name))
 
-    def boxes_of(self, class_name: str, image_path: Path) -> tuple[ReferenceBox, ...]:
+    def pixels_of(self, reference_image: ReferenceImage) -> Image.Image:
+        """
+        Pixels of a reference image.
+
+        Parameters
+        ----------
+        reference_image : ReferenceImage
+            Image holding at least one box.
+
+        Returns
+        -------
+        Image.Image
+            RGB pixels given when its boxes were added.
+
+        Raises
+        ------
+        KeyError
+            If no box lies on the image.
+        """
+        if reference_image not in self._images:
+            raise KeyError(f"No reference box lies on '{reference_image.name}'.")
+        return self._images[reference_image]
+
+    def boxes_of(self, class_name: str, reference_image: ReferenceImage) -> tuple[ReferenceBox, ...]:
         """
         Boxes of one class on one reference image.
 
@@ -76,7 +111,7 @@ class ReferenceBoard:
         ----------
         class_name : str
             Class to look up.
-        image_path : Path
+        reference_image : ReferenceImage
             Reference image.
 
         Returns
@@ -84,7 +119,9 @@ class ReferenceBoard:
         tuple[ReferenceBox, ...]
             Boxes in drawing order.
         """
-        return tuple(box for box in self._boxes if box.class_name == class_name and box.image_path == image_path)
+        return tuple(
+            box for box in self._boxes if box.class_name == class_name and box.reference_image == reference_image
+        )
 
     def add(self, box: ReferenceBox, image: Image.Image) -> None:
         """
@@ -95,20 +132,43 @@ class ReferenceBoard:
         box : ReferenceBox
             Box to add.
         image : Image.Image
-            RGB pixels of ``box.image_path``, kept as long as the image has boxes.
+            RGB pixels of ``box.reference_image``, kept as long as the image has boxes.
 
         Raises
         ------
         ValueError
             If the box does not lie inside ``image``.
         """
-        width, height = image.size
-        if box.left < 0 or box.top < 0 or box.right > width or box.bottom > height:
-            raise ValueError(f"box must lie inside the {width}x{height} image. got {box.xyxy}")
+        self._require_inside(box, image)
         self._boxes.append(box)
-        self._images[box.image_path] = image
+        self._images[box.reference_image] = image
 
-    def remove_reference_image(self, class_name: str, image_path: Path) -> None:
+    def replace(self, boxes: Sequence[ReferenceBox], pixels: Mapping[ReferenceImage, Image.Image]) -> None:
+        """
+        Replace every box, e.g. with the boxes of a loaded class set.
+
+        Parameters
+        ----------
+        boxes : Sequence[ReferenceBox]
+            New boxes in drawing order.
+        pixels : Mapping[ReferenceImage, Image.Image]
+            RGB pixels of every image the boxes lie on; images without a box are ignored.
+
+        Raises
+        ------
+        KeyError
+            If the pixels of an image are missing; the board is left unchanged.
+        ValueError
+            If a box does not lie inside its image; the board is left unchanged.
+        """
+        for box in boxes:
+            if box.reference_image not in pixels:
+                raise KeyError(f"Pixels of the reference image '{box.reference_image.name}' are missing.")
+            self._require_inside(box, pixels[box.reference_image])
+        self._boxes = list(boxes)
+        self._images = {box.reference_image: pixels[box.reference_image] for box in boxes}
+
+    def remove_reference_image(self, class_name: str, reference_image: ReferenceImage) -> None:
         """
         Remove the boxes of one class on one reference image, i.e. one visual query.
 
@@ -116,15 +176,15 @@ class ReferenceBoard:
         ----------
         class_name : str
             Class of the boxes.
-        image_path : Path
+        reference_image : ReferenceImage
             Reference image of the boxes.
         """
         self._boxes = [
-            box for box in self._boxes if not (box.class_name == class_name and box.image_path == image_path)
+            box for box in self._boxes if not (box.class_name == class_name and box.reference_image == reference_image)
         ]
         self._forget_unused_images()
 
-    def move_reference_image(self, class_name: str, image_path: Path, target_class_name: str) -> None:
+    def move_reference_image(self, class_name: str, reference_image: ReferenceImage, target_class_name: str) -> None:
         """
         Move the boxes of one class on one reference image to another class.
 
@@ -134,13 +194,15 @@ class ReferenceBoard:
         ----------
         class_name : str
             Class the boxes belong to.
-        image_path : Path
+        reference_image : ReferenceImage
             Reference image of the boxes.
         target_class_name : str
             Class to move the boxes to.
         """
         self._boxes = [
-            box.renamed(target_class_name) if box.class_name == class_name and box.image_path == image_path else box
+            box.renamed(target_class_name)
+            if box.class_name == class_name and box.reference_image == reference_image
+            else box
             for box in self._boxes
         ]
 
@@ -177,6 +239,33 @@ class ReferenceBoard:
         self._boxes = [box for box in self._boxes if box.class_name in kept_names]
         self._forget_unused_images()
 
+    def reference_only_classes(
+        self, definitions: Sequence[ClassDefinition], supported_kinds: frozenset[PromptKind]
+    ) -> tuple[str, ...]:
+        """
+        Classes queried only by reference images that the selected model cannot take.
+
+        Parameters
+        ----------
+        definitions : Sequence[ClassDefinition]
+            Classes to detect.
+        supported_kinds : frozenset[PromptKind]
+            Query kinds the selected model accepts.
+
+        Returns
+        -------
+        tuple[str, ...]
+            Names of classes without a phrase but with reference images, in class order; empty when the model
+            accepts reference images.
+        """
+        if PromptKind.VISUAL in supported_kinds:
+            return ()
+        return tuple(
+            definition.name
+            for definition in definitions
+            if not definition.text_queries and self.reference_images_of(definition.name)
+        )
+
     def build_prompt(
         self, definitions: Sequence[ClassDefinition], supported_kinds: frozenset[PromptKind]
     ) -> LabeledPrompt:
@@ -207,15 +296,15 @@ class ReferenceBoard:
         for definition in definitions:
             queries: list[PromptQuery] = [TextQuery(phrase) for phrase in definition.text_queries]
             query_labels.extend(definition.text_queries)
-            image_paths: tuple[Path, ...] = self.reference_images_of(definition.name)
+            reference_images: tuple[ReferenceImage, ...] = self.reference_images_of(definition.name)
             if is_visual_supported:
-                for image_path in image_paths:
-                    signature: ReferenceSignature = self._signature_of(definition.name, image_path)
+                for reference_image in reference_images:
+                    signature: ReferenceSignature = self._signature_of(definition.name, reference_image)
                     used_references[signature] = self._reference_for(signature)
                     queries.append(VisualQuery(references=(used_references[signature],)))
-                    query_labels.append(image_path.name)
+                    query_labels.append(reference_image.name)
             if not queries:
-                raise ValueError(self._describe_missing_queries(definition.name, has_references=bool(image_paths)))
+                raise ValueError(self._describe_missing_queries(definition.name, has_references=bool(reference_images)))
             class_queries[definition.name] = tuple(queries)
         if not class_queries:
             raise ValueError("Add at least one class to detect.")
@@ -231,19 +320,31 @@ class ReferenceBoard:
             )
         return f"'{class_name}' has no phrase and no reference image. Add a phrase to the class."
 
-    def _signature_of(self, class_name: str, image_path: Path) -> ReferenceSignature:
-        return (class_name, image_path, tuple(box.xyxy for box in self.boxes_of(class_name, image_path)))
+    @staticmethod
+    def _require_inside(box: ReferenceBox, image: Image.Image) -> None:
+        width, height = image.size
+        if box.left < 0 or box.top < 0 or box.right > width or box.bottom > height:
+            raise ValueError(f"box must lie inside the {width}x{height} image. got {box.xyxy}")
+
+    def _signature_of(self, class_name: str, reference_image: ReferenceImage) -> ReferenceSignature:
+        return (
+            class_name,
+            reference_image,
+            tuple(box.xyxy for box in self.boxes_of(class_name, reference_image)),
+        )
 
     def _reference_for(self, signature: ReferenceSignature) -> VisualReference:
         cached: VisualReference | None = self._references.get(signature)
         if cached is not None:
             return cached
-        _, image_path, xyxy = signature
+        _, reference_image, xyxy = signature
         return VisualReference(
-            image=self._images[image_path],
+            image=self._images[reference_image],
             boxes=Boxes2D.register(value=np.array(xyxy, dtype=np.float64), box2d_format=Box2DFormat.XYXY),
         )
 
     def _forget_unused_images(self) -> None:
-        used_paths: frozenset[Path] = frozenset(box.image_path for box in self._boxes)
-        self._images = {path: image for path, image in self._images.items() if path in used_paths}
+        used_images: frozenset[ReferenceImage] = frozenset(box.reference_image for box in self._boxes)
+        self._images = {
+            reference_image: image for reference_image, image in self._images.items() if reference_image in used_images
+        }

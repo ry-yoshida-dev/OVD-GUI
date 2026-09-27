@@ -5,7 +5,7 @@ from PIL import Image
 from PySide6.QtCore import QRectF
 from PySide6.QtWidgets import QApplication
 
-from ovd_gui.detection import ReferenceBox
+from ovd_gui.detection import ReferenceBox, ReferenceImage
 from ovd_gui.gui.class_palette import ClassPalette
 from ovd_gui.gui.prompt import ReferenceImageDialog
 from ovd_gui.gui.viewer import ImageCanvas
@@ -28,7 +28,14 @@ def _canvas_of(dialog: ReferenceImageDialog) -> ImageCanvas:
 
 def test_without_boxes_the_whole_image_is_the_reference(dialog: ReferenceImageDialog) -> None:
     assert dialog.boxes == (
-        ReferenceBox(image_path=Path("example.png"), class_name="dog", left=0.0, top=0.0, right=120.0, bottom=80.0),
+        ReferenceBox(
+            reference_image=ReferenceImage.of("example.png", Image.new("RGB", (120, 80))),
+            class_name="dog",
+            left=0.0,
+            top=0.0,
+            right=120.0,
+            bottom=80.0,
+        ),
     )
 
 

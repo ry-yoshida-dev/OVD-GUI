@@ -105,3 +105,21 @@ def test_cancelled_batch_stops_before_the_next_image(
     worker.run_batch(request)
     assert len(recorder.detected) == 1
     assert recorder.summaries == [BatchDetectionSummary(detected_count=1, unreadable_paths=(), is_cancelled=True)]
+
+
+def test_image_prioritized_during_a_batch_is_detected_next(
+    worker: DetectionWorker, settings: DetectorSettings, tmp_path: Path
+) -> None:
+    image_paths: tuple[Path, ...] = tuple(_image(tmp_path, name) for name in ("a.png", "b.png", "c.png"))
+    request: BatchDetectionRequest = BatchDetectionRequest(
+        settings=settings, labeled_prompt=_labeled_prompt(), image_paths=image_paths
+    )
+    recorder: BatchRecorder = BatchRecorder(worker)
+
+    def prioritize_last_image(image_path: Path, result: DetectionResult) -> None:
+        request.prioritize(image_paths[2])
+
+    worker.image_detected.connect(prioritize_last_image)
+    worker.run_batch(request)
+    assert [path.name for path, _ in recorder.detected] == ["a.png", "c.png", "b.png"]
+    assert recorder.summaries == [BatchDetectionSummary(detected_count=3, unreadable_paths=(), is_cancelled=False)]

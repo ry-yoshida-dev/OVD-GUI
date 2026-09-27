@@ -1,7 +1,7 @@
 from PySide6.QtCore import QRectF
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
-from ...detection import ReferenceBox
+from ...detection import ReferenceBox, ReferenceImage
 from ...media import LoadedImage
 from ..class_palette import ClassPalette
 from ..viewer import ImageCanvas
@@ -33,6 +33,7 @@ class ReferenceImageDialog(QDialog):
         self.setWindowTitle(self.WINDOW_TITLE)
         self.setMinimumSize(self.MINIMUM_WIDTH, self.MINIMUM_HEIGHT)
         self._loaded_image: LoadedImage | None = None
+        self._reference_image: ReferenceImage | None = None
         self._class_name: str = ""
         self._class_names: tuple[str, ...] = ()
         self._boxes: list[ReferenceBox] = []
@@ -76,14 +77,14 @@ class ReferenceImageDialog(QDialog):
         tuple[ReferenceBox, ...]
             Drawn boxes, or one box covering the whole image while none is drawn; empty before an image is set.
         """
-        if self._loaded_image is None:
+        if self._loaded_image is None or self._reference_image is None:
             return ()
         if self._boxes:
             return tuple(self._boxes)
         width, height = self._loaded_image.image.size
         return (
             ReferenceBox(
-                image_path=self._loaded_image.path,
+                reference_image=self._reference_image,
                 class_name=self._class_name,
                 left=0.0,
                 top=0.0,
@@ -106,6 +107,7 @@ class ReferenceImageDialog(QDialog):
             Current classes, whose index selects the box color.
         """
         self._loaded_image = loaded_image
+        self._reference_image = ReferenceImage.of(loaded_image.path.name, loaded_image.image)
         self._class_name = class_name
         self._class_names = class_names
         self._boxes = []
@@ -143,11 +145,11 @@ class ReferenceImageDialog(QDialog):
         return self.boxes
 
     def _on_rectangle_drawn(self, rectangle: QRectF) -> None:
-        if self._loaded_image is None:
+        if self._reference_image is None:
             return
         self._boxes.append(
             ReferenceBox(
-                image_path=self._loaded_image.path,
+                reference_image=self._reference_image,
                 class_name=self._class_name,
                 left=rectangle.left(),
                 top=rectangle.top(),
@@ -161,7 +163,7 @@ class ReferenceImageDialog(QDialog):
         if not 0 <= box_index < len(self._boxes):
             return
         self._boxes[box_index] = ReferenceBox(
-            image_path=self._boxes[box_index].image_path,
+            reference_image=self._boxes[box_index].reference_image,
             class_name=self._boxes[box_index].class_name,
             left=rectangle.left(),
             top=rectangle.top(),

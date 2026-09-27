@@ -4,7 +4,7 @@ from pathlib import Path
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPersistentModelIndex, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication, QPalette
 
-from ...detection import DetectionRecord
+from ...detection import DetectionCatalog, DetectionRecord
 from ..class_palette import ClassPalette
 from .analysis_state import AnalysisState
 from .image_status_row import ImageStatusRow
@@ -153,6 +153,55 @@ class ResultRowModel(QAbstractTableModel):
             raise IndexError(f"row must be in [0, {len(self._rows)}). got {row}")
         return self._rows[row]
 
+    @staticmethod
+    def cell_text(row: ResultRow, column: ResultColumn) -> str:
+        """
+        Text shown in one cell.
+
+        Parameters
+        ----------
+        row : ResultRow
+            Row of the cell.
+        column : ResultColumn
+            Column of the cell.
+
+        Returns
+        -------
+        str
+            Displayed text; empty for a blank cell.
+        """
+        return ResultRowModel._display_text(row, column)
+
+    @staticmethod
+    def cell_number(row: ResultRow, column: ResultColumn) -> float | None:
+        """
+        Unrounded number of one numeric cell.
+
+        Parameters
+        ----------
+        row : ResultRow
+            Row of the cell.
+        column : ResultColumn
+            Numeric column of the cell.
+
+        Returns
+        -------
+        float | None
+            Confidence or box coordinate, or ``None`` for a row without detection.
+
+        Raises
+        ------
+        ValueError
+            If ``column`` is not numeric.
+        """
+        if not column.is_numeric:
+            raise ValueError(f"{column.header} is not a numeric column")
+        match row:
+            case ImageStatusRow():
+                return None
+            case DetectionRecord():
+                return float(ResultRowModel._record_sort_value(row, column))
+
     def add_images(self, image_paths: Sequence[Path]) -> None:
         """
         List newly opened images as not analyzed.
@@ -189,12 +238,18 @@ class ResultRowModel(QAbstractTableModel):
         )
         self._replace_rows(image_path, new_rows)
 
-    def clear_results(self) -> None:
+    def show_catalog(self, catalog: DetectionCatalog | None) -> None:
         """
-        Forget every detection, listing every image as not analyzed again.
+        List the detections stored in a catalog in place of the current rows.
+
+        Parameters
+        ----------
+        catalog : DetectionCatalog | None
+            Results to list; images it holds no result for, or every image when ``None``, are listed as not
+            analyzed.
         """
         self.beginResetModel()
-        self._rows = [ImageStatusRow(image_path, AnalysisState.NOT_ANALYZED) for image_path in self._image_paths]
+        self._rows = [row for image_path in self._image_paths for row in self._rows_from(catalog, image_path)]
         self.endResetModel()
 
     def set_current_image(self, image_path: Path | None) -> None:
@@ -213,6 +268,13 @@ class ResultRowModel(QAbstractTableModel):
         for changed_image_path in (previous_image_path, image_path):
             if changed_image_path is not None:
                 self._emit_rows_changed(changed_image_path)
+
+    @staticmethod
+    def _rows_from(catalog: DetectionCatalog | None, image_path: Path) -> tuple[ResultRow, ...]:
+        if catalog is None or image_path not in catalog:
+            return (ImageStatusRow(image_path, AnalysisState.NOT_ANALYZED),)
+        records: tuple[DetectionRecord, ...] = catalog.records_of(image_path)
+        return records if records else (ImageStatusRow(image_path, AnalysisState.NO_DETECTIONS),)
 
     def _replace_rows(self, image_path: Path, new_rows: Sequence[ResultRow]) -> None:
         old_rows: list[int] = self._row_numbers_of(image_path)

@@ -5,15 +5,27 @@ from typing import ClassVar
 
 import numpy as np
 import pytest
-from open_vocabulary_detector import DetectionResult, DetectorBackend, ImageSize, OpenVocabularyDetector, Prompt
+from open_vocabulary_detector import (
+    DetectionResult,
+    DetectorBackend,
+    ImageSize,
+    OpenVocabularyDetector,
+    Prompt,
+    PromptKind,
+)
 from PIL import Image
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QTableView
+from PySide6.QtWidgets import QApplication, QMessageBox, QTableView
 
+from ovd_gui.detection import DeviceAvailability, ReferenceBox, ReferenceImage
 from ovd_gui.gui import MainWindow
-from ovd_gui.gui.table import AnalysisState, ImageStatusRow, ResultColumn, ResultPanel
+from ovd_gui.gui.execution import BatchJob
+from ovd_gui.gui.table import AnalysisState, ImageStatusRow, ProfilePanel, ResultColumn, ResultPanel, ValueCondition
 from ovd_gui.preset import PresetCatalog
+from ovd_gui.storage import ClassSetStore
 from ovd_gui.vocabulary import ClassDefinition, ClassListStore
+
+_REFERENCE_IMAGE: ReferenceImage = ReferenceImage.of("a.jpg", Image.new("RGB", (10, 10)))
 
 
 class WidthCountingDetector(OpenVocabularyDetector):
@@ -41,24 +53,31 @@ def window(application: QApplication, tmp_path: Path) -> Iterator[MainWindow]:
     image_directory.mkdir()
     for index, width in enumerate((32, 64, 96)):
         Image.new("RGB", (width, 16)).save(image_directory / f"image{index}.png")
-    main_window: MainWindow = MainWindow(PresetCatalog.from_package(), ClassListStore(tmp_path / "data"))
+    main_window: MainWindow = MainWindow(
+        PresetCatalog.from_package(),
+        ClassListStore(tmp_path / "data"),
+        ClassSetStore(tmp_path / "data"),
+        DeviceAvailability(is_cuda_available=False, is_mps_available=False),
+    )
     main_window._class_editor.set_classes((ClassDefinition.named("cat"), ClassDefinition.named("dog")))
-    main_window.open_paths([image_directory])
     main_window._runner._worker._session._detector = WidthCountingDetector(
         main_window._settings_panel.current_settings()
     )
+    main_window.open_paths([image_directory])
     yield main_window
     main_window.close()
 
 
 def _wait_until_idle(application: QApplication, window: MainWindow) -> None:
     deadline: float = time.monotonic() + 10.0
-    while window._runner.is_busy and time.monotonic() < deadline:
+    while not window._runner.is_idle and time.monotonic() < deadline:
         application.processEvents()
-    assert not window._runner.is_busy
+    assert window._runner.is_idle
 
 
-def _child[WidgetType: ResultPanel | QTableView](window: MainWindow, widget_type: type[WidgetType]) -> WidgetType:
+def _child[WidgetType: ResultPanel | ProfilePanel | QTableView](
+    window: MainWindow, widget_type: type[WidgetType]
+) -> WidgetType:
     widget: WidgetType | None = window.findChild(widget_type)
     assert widget is not None
     return widget
@@ -84,7 +103,7 @@ def test_detect_all_lists_every_image_and_opens_the_image_of_a_selected_row(
     panel: ResultPanel = _child(window, ResultPanel)
     assert len(panel.visible_records) == 6
 
-    panel.set_class_filter({"dog"})
+    panel.set_column_filter(ResultColumn.CLASS, ValueCondition(frozenset({"dog"})))
     assert [(record.image_path.name, record.detection_index) for record in panel.visible_records] == [
         ("image1.png", 1),
         ("image2.png", 1),
@@ -120,3 +139,120 @@ def test_detections_are_reported_under_their_class_and_name_the_matched_query(
         (record.detection.class_name, record.query_label) for record in _child(window, ResultPanel).visible_records
     }
     assert listed == {("car", "car"), ("car", "suv"), ("dog", "dog")}
+
+
+def test_reference_only_classes_are_skipped_after_confirmation(
+    application: QApplication, window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert PromptKind.VISUAL not in window._settings_panel.selected_backend.supported_prompt_kinds
+    window._class_editor.set_classes((ClassDefinition.parse("mug:"), ClassDefinition.named("dog")))
+    window._reference_board.add(ReferenceBox(_REFERENCE_IMAGE, "mug", 0.0, 0.0, 5.0, 5.0), Image.new("RGB", (10, 10)))
+    questions: list[str] = []
+    answers: list[QMessageBox.StandardButton] = [QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes]
+
+    def answer_question(*arguments: object) -> QMessageBox.StandardButton:
+        questions.append(str(arguments[2]))
+        return answers.pop(0)
+
+    monkeypatch.setattr(QMessageBox, "question", answer_question)
+    window._detect_all()
+    assert not window._runner.is_busy
+    window._detect_all()
+    _wait_until_idle(application, window)
+    assert {record.detection.class_name for record in _child(window, ResultPanel).visible_records} == {"dog"}
+    window._detect_all()
+    _wait_until_idle(application, window)
+    assert len(questions) == 2
+    assert "mug" in questions[0]
+
+
+def test_detect_all_runs_in_the_background_with_cancellable_progress_in_the_status_bar(
+    application: QApplication, window: MainWindow
+) -> None:
+    window._detect_all()
+    assert window._batch_progress_dialog.isHidden()
+    assert not window._run_progress_indicator.isHidden()
+    assert window._run_progress_indicator._progress_bar.maximum() == 3
+    assert not window._run_progress_indicator._cancel_button.isHidden()
+    assert window._class_editor.isEnabled()
+
+    window._run_progress_indicator._cancel_button.click()
+    assert not window._run_progress_indicator._cancel_button.isEnabled()
+    _wait_until_idle(application, window)
+    assert window._run_progress_indicator.isHidden()
+    assert window._batch_progress_dialog.isHidden()
+
+
+def _detected_image_names(window: MainWindow) -> set[str]:
+    return {record.image_path.name for record in _child(window, ResultPanel).visible_records}
+
+
+def test_shown_image_is_detected_in_the_background_without_blocking_the_window(
+    application: QApplication, window: MainWindow
+) -> None:
+    assert not window._runner.is_idle
+    assert not window._runner.is_busy
+    assert window._detect_button.isEnabled()
+    assert window._settings_panel.isEnabled()
+    _wait_until_idle(application, window)
+    assert _detected_image_names(window) == {"image0.png"}
+    assert len(window._canvas._box_items) == 1
+
+
+def test_only_the_latest_shown_image_waits_for_background_detection(
+    application: QApplication, window: MainWindow
+) -> None:
+    window._image_list.setCurrentRow(1)
+    window._image_list.setCurrentRow(2)
+    _wait_until_idle(application, window)
+    assert _detected_image_names(window) == {"image0.png", "image2.png"}
+    assert len(window._canvas._box_items) == 3
+
+
+def test_detect_all_starts_after_the_background_detection_and_detects_the_shown_image_first(
+    application: QApplication, window: MainWindow
+) -> None:
+    detected_order: list[str] = []
+
+    def record_order(job: BatchJob, image_path: Path, result: DetectionResult) -> None:
+        detected_order.append(image_path.name)
+
+    window._runner.batch_image_detected.connect(record_order)
+    window._detect_all()
+    assert window._runner.is_busy
+    assert not window._detect_button.isEnabled()
+    window._image_list.setCurrentRow(2)
+    assert window.statusBar().currentMessage() != "A detection is already running."
+    _wait_until_idle(application, window)
+    assert detected_order == ["image2.png", "image0.png", "image1.png"]
+    assert len(_child(window, ResultPanel).visible_records) == 6
+
+
+def test_results_of_each_model_are_kept_and_shown_again_without_detecting(
+    application: QApplication, window: MainWindow
+) -> None:
+    window._detect_all()
+    _wait_until_idle(application, window)
+    window._settings_panel._confidence_spin.setValue(0.9)
+    window._image_list.setCurrentRow(2)
+    window._request_detection()
+    _wait_until_idle(application, window)
+    panel: ResultPanel = _child(window, ResultPanel)
+    assert len(panel.visible_records) == 3
+    assert [row.image_path.name for row in panel.visible_rows if isinstance(row, ImageStatusRow)] == [
+        "image0.png",
+        "image1.png",
+    ]
+
+    profile_panel: ProfilePanel = _child(window, ProfilePanel)
+    first_profile, second_profile = profile_panel.profiles
+    assert profile_panel.selected_profile == second_profile
+    profile_panel.select_profile(first_profile)
+    assert not window._runner.is_busy
+    assert len(panel.visible_records) == 6
+    assert len(window._canvas._box_items) == 3
+
+    window._remove_profile(first_profile)
+    assert profile_panel.profiles == (second_profile,)
+    assert profile_panel.selected_profile == second_profile
+    assert len(panel.visible_records) == 3

@@ -1,5 +1,4 @@
 from functools import partial
-from pathlib import Path
 
 from PySide6.QtCore import QItemSelectionModel, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QKeyEvent, QMouseEvent
@@ -13,7 +12,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...detection import ReferenceBoard
+from ...detection import ReferenceBoard, ReferenceImage
 from ...vocabulary import ClassDefinition, ClassVocabulary
 from ..class_palette import ClassPalette
 from .placeholder_item_delegate import PlaceholderItemDelegate
@@ -55,13 +54,13 @@ class ClassTree(QTreeWidget):
     classes_edited: Signal = Signal()
     edit_rejected: Signal = Signal(str)
 
-    HEADERS: tuple[str, ...] = ("Class / Query", "ID", "#")
+    HEADERS: tuple[str, ...] = ("Class / Prompt", "ID", "#")
     NAME_COLUMN = 0
     ID_COLUMN = 1
     QUERY_COUNT_COLUMN = 2
     MINIMUM_HEIGHT = 160
     NEW_CLASS_PLACEHOLDER = "Class name, e.g. car"
-    NEW_PHRASE_PLACEHOLDER = "Phrase, e.g. suv"
+    NEW_PHRASE_PLACEHOLDER = "Prompt, e.g. suv"
     IGNORED_COLOR = QColor("#8a8a8a")
     WARNING_COLOR = QColor("#d9822b")
     REMOVE_KEYS: frozenset[Qt.Key] = frozenset({Qt.Key.Key_Delete, Qt.Key.Key_Backspace})
@@ -100,7 +99,7 @@ class ClassTree(QTreeWidget):
         self.setColumnCount(len(self.HEADERS))
         self.setHeaderLabels(list(self.HEADERS))
         self.headerItem().setToolTip(
-            self.QUERY_COUNT_COLUMN, "Number of queries the selected model reads for the class."
+            self.QUERY_COUNT_COLUMN, "Number of prompts the selected model reads for the class."
         )
         header: QHeaderView = self.header()
         header.setStretchLastSection(False)
@@ -111,8 +110,8 @@ class ClassTree(QTreeWidget):
         self.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.EditKeyPressed)
         self.setAlternatingRowColors(True)
         self.setToolTip(
-            "Double-click a class or phrase to edit it, or the empty area to add a class; "
-            + "Delete removes the selected classes, phrases or images."
+            "Double-click a class or prompt to edit it, or the empty area to add a class; "
+            + "Delete removes the selected classes, prompts or images."
         )
         self.setMinimumHeight(self.MINIMUM_HEIGHT)
         self.setDragEnabled(True)
@@ -325,7 +324,7 @@ class ClassTree(QTreeWidget):
             return
         removed_classes: set[int] = set()
         removed_phrases: dict[int, set[int]] = {}
-        removed_images: list[tuple[str, Path]] = []
+        removed_images: list[tuple[str, ReferenceImage]] = []
         for item in selected_items:
             parent: QTreeWidgetItem | None = item.parent()
             if parent is None:
@@ -337,10 +336,10 @@ class ClassTree(QTreeWidget):
             if child_index < len(definition.text_queries):
                 removed_phrases.setdefault(class_index, set()).add(child_index)
             else:
-                image_paths: tuple[Path, ...] = self._board.reference_images_of(definition.name)
-                removed_images.append((definition.name, image_paths[child_index - len(definition.text_queries)]))
-        for class_name, image_path in removed_images:
-            self._board.remove_reference_image(class_name, image_path)
+                reference_images: tuple[ReferenceImage, ...] = self._board.reference_images_of(definition.name)
+                removed_images.append((definition.name, reference_images[child_index - len(definition.text_queries)]))
+        for class_name, reference_image in removed_images:
+            self._board.remove_reference_image(class_name, reference_image)
         for class_index, phrase_indices in removed_phrases.items():
             self._vocabulary.remove_phrases(class_index, phrase_indices)
         self._vocabulary.remove_classes(removed_classes)
@@ -387,8 +386,8 @@ class ClassTree(QTreeWidget):
         super().keyPressEvent(event)
 
     def _class_item_of(self, class_index: int, definition: ClassDefinition) -> QTreeWidgetItem:
-        image_paths: tuple[Path, ...] = self._board.reference_images_of(definition.name)
-        used_image_count: int = len(image_paths) if self._is_image_prompt_supported else 0
+        reference_images: tuple[ReferenceImage, ...] = self._board.reference_images_of(definition.name)
+        used_image_count: int = len(reference_images) if self._is_image_prompt_supported else 0
         query_count: int = len(definition.text_queries) + used_image_count
         class_item: QTreeWidgetItem = QTreeWidgetItem([definition.name, str(class_index), str(query_count)])
         class_item.setIcon(self.NAME_COLUMN, self._palette.swatch_of(class_index))
@@ -399,38 +398,36 @@ class ClassTree(QTreeWidget):
         )
         class_item.setToolTip(
             self.QUERY_COUNT_COLUMN,
-            f"{len(definition.text_queries)} phrase{'' if len(definition.text_queries) == 1 else 's'}, "
+            f"{len(definition.text_queries)} text prompt{'' if len(definition.text_queries) == 1 else 's'}, "
             + f"{used_image_count} reference image{'' if used_image_count == 1 else 's'}",
         )
         if query_count == 0:
             class_item.setForeground(self.NAME_COLUMN, QBrush(self.WARNING_COLOR))
-            class_item.setToolTip(self.NAME_COLUMN, "No query the selected model can use; add a phrase.")
+            class_item.setToolTip(self.NAME_COLUMN, "No query the selected model can use; add a prompt.")
         for phrase in definition.text_queries:
             phrase_item: QTreeWidgetItem = QTreeWidgetItem([phrase, "", ""])
             phrase_item.setFlags((phrase_item.flags() | Qt.ItemFlag.ItemIsEditable) & ~Qt.ItemFlag.ItemIsDropEnabled)
             phrase_item.setToolTip(
                 self.NAME_COLUMN,
-                f"Phrase querying '{definition.name}'; double-click to edit, drag to move it to another class.",
+                f"Text prompt for '{definition.name}'; double-click to edit, drag to move it to another class.",
             )
             class_item.addChild(phrase_item)
-        for image_path in image_paths:
-            class_item.addChild(self._reference_item_of(definition.name, image_path))
+        for reference_image in reference_images:
+            class_item.addChild(self._reference_item_of(definition.name, reference_image))
         return class_item
 
-    def _reference_item_of(self, class_name: str, image_path: Path) -> QTreeWidgetItem:
-        box_count: int = len(self._board.boxes_of(class_name, image_path))
+    def _reference_item_of(self, class_name: str, reference_image: ReferenceImage) -> QTreeWidgetItem:
+        box_count: int = len(self._board.boxes_of(class_name, reference_image))
         reference_item: QTreeWidgetItem = QTreeWidgetItem(
-            [f"{image_path.name} ({box_count} box{'' if box_count == 1 else 'es'})", "", ""]
+            [f"{reference_image.name} ({box_count} box{'' if box_count == 1 else 'es'})", "", ""]
         )
         reference_item.setIcon(self.NAME_COLUMN, self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
         reference_item.setFlags(reference_item.flags() & ~Qt.ItemFlag.ItemIsDropEnabled)
         if self._is_image_prompt_supported:
-            reference_item.setToolTip(self.NAME_COLUMN, f"Reference image querying '{class_name}'\n{image_path}")
+            reference_item.setToolTip(self.NAME_COLUMN, f"Reference image prompting '{class_name}'")
         else:
             reference_item.setForeground(self.NAME_COLUMN, QBrush(self.IGNORED_COLOR))
-            reference_item.setToolTip(
-                self.NAME_COLUMN, f"Ignored: the selected backend does not take image prompts.\n{image_path}"
-            )
+            reference_item.setToolTip(self.NAME_COLUMN, "Ignored: the selected backend does not take image prompts.")
         return reference_item
 
     def _selected_item(self) -> QTreeWidgetItem | None:
@@ -483,13 +480,13 @@ class ClassTree(QTreeWidget):
                 raise ValueError("A reference image cannot become a class; drop it on a class instead.")
             case QueryDropKind.INTO_CLASS:
                 class_name: str = self._vocabulary.class_names[class_index]
-                image_path: Path = self._board.reference_images_of(class_name)[
+                reference_image: ReferenceImage = self._board.reference_images_of(class_name)[
                     child_index - self._phrase_count(class_index)
                 ]
                 target_name: str = self._vocabulary.class_names[target.class_index]
-                self._board.move_reference_image(class_name, image_path, target_name)
+                self._board.move_reference_image(class_name, reference_image, target_name)
                 self._expanded_class_names.add(target_name)
-                image_position: int = self._board.reference_images_of(target_name).index(image_path)
+                image_position: int = self._board.reference_images_of(target_name).index(reference_image)
                 return (target.class_index, self._phrase_count(target.class_index) + image_position)
 
     def _phrase_count(self, class_index: int) -> int:

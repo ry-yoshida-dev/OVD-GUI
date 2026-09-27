@@ -1,5 +1,6 @@
 from dataclasses import dataclass, replace
-from pathlib import Path
+
+from .reference_image import ReferenceImage
 
 
 @dataclass(frozen=True)
@@ -9,7 +10,7 @@ class ReferenceBox:
 
     Attributes
     ----------
-    image_path : Path
+    reference_image : ReferenceImage
         Image the box was drawn on.
     class_name : str
         Class the boxed instance shows.
@@ -28,7 +29,7 @@ class ReferenceBox:
         If the class name is blank or the box has no area.
     """
 
-    image_path: Path
+    reference_image: ReferenceImage
     class_name: str
     left: float
     top: float

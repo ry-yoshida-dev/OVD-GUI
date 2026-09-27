@@ -4,14 +4,25 @@ import pytest
 from PIL import Image
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QAbstractItemView, QApplication, QLineEdit, QToolButton, QTreeWidgetItem
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QComboBox,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QToolButton,
+    QTreeWidgetItem,
+)
 
-from ovd_gui.detection import ReferenceBoard, ReferenceBox
+from ovd_gui.detection import ReferenceBoard, ReferenceBox, ReferenceImage
 from ovd_gui.gui.class_palette import ClassPalette
-from ovd_gui.gui.prompt import ClassEditor, ClassTree, ReferenceImageImporter
-from ovd_gui.vocabulary import ClassDefinition, ClassListFile, ClassListStore
+from ovd_gui.gui.prompt import ClassEditor, ClassSetDialog, ClassTree, ReferenceImageImporter
+from ovd_gui.storage import ClassSetArchive, ClassSetStore
+from ovd_gui.vocabulary import ClassDefinition, ClassListStore
 
 EVENT_WAIT_MILLISECONDS = 20
+_REFERENCE_IMAGE: ReferenceImage = ReferenceImage.of("a.jpg", Image.new("RGB", (10, 10)))
 DropPosition = QAbstractItemView.DropIndicatorPosition
 
 
@@ -22,7 +33,10 @@ def board() -> ReferenceBoard:
 
 @pytest.fixture
 def editor(application: QApplication, tmp_path: Path, board: ReferenceBoard) -> ClassEditor:
-    class_editor: ClassEditor = ClassEditor(ClassPalette(), ClassListStore(tmp_path / "ovd_gui_data"), board)
+    data_directory: Path = tmp_path / "ovd_gui_data"
+    class_editor: ClassEditor = ClassEditor(
+        ClassPalette(), ClassListStore(data_directory), ClassSetStore(data_directory), board
+    )
     class_editor.resize(320, 400)
     class_editor.show()
     return class_editor
@@ -86,11 +100,11 @@ def test_class_rows_show_id_and_query_count_with_phrases_as_children(editor: Cla
 
 def test_editing_a_class_renames_it_and_its_named_phrase(editor: ClassEditor, board: ReferenceBoard) -> None:
     editor.set_classes((ClassDefinition.named("cat"), ClassDefinition.named("dog")))
-    board.add(ReferenceBox(Path("a.jpg"), "cat", 0.0, 0.0, 5.0, 5.0), Image.new("RGB", (10, 10)))
+    board.add(ReferenceBox(_REFERENCE_IMAGE, "cat", 0.0, 0.0, 5.0, 5.0), Image.new("RGB", (10, 10)))
     _class_item(editor, 0).setText(0, "  kitten ")
     assert _texts(editor) == ["kitten", "dog"]
     assert _child_texts(editor, 0)[0] == "kitten"
-    assert board.reference_images_of("kitten") == (Path("a.jpg"),)
+    assert board.reference_images_of("kitten") == (_REFERENCE_IMAGE,)
     _class_item(editor, 0).setText(0, "DOG")
     assert _texts(editor) == ["kitten", "dog"]
     assert _class_item(editor, 0).text(0) == "kitten"
@@ -109,7 +123,7 @@ def test_delete_removes_selected_classes_phrases_and_reference_images(
     editor: ClassEditor, board: ReferenceBoard
 ) -> None:
     editor.set_classes((ClassDefinition.named("cat"), ClassDefinition.parse("dog: dog, puppy")))
-    board.add(ReferenceBox(Path("a.jpg"), "dog", 0.0, 0.0, 5.0, 5.0), Image.new("RGB", (10, 10)))
+    board.add(ReferenceBox(_REFERENCE_IMAGE, "dog", 0.0, 0.0, 5.0, 5.0), Image.new("RGB", (10, 10)))
     editor.refresh_references()
     assert _child_texts(editor, 1) == ["dog", "puppy", "a.jpg (1 box)"]
     tree: ClassTree = _tree_of(editor)
@@ -128,7 +142,7 @@ def test_reference_images_are_greyed_out_without_image_prompt_support(
     editor: ClassEditor, board: ReferenceBoard
 ) -> None:
     editor.set_classes((ClassDefinition.parse("mug:"),))
-    board.add(ReferenceBox(Path("a.jpg"), "mug", 0.0, 0.0, 5.0, 5.0), Image.new("RGB", (10, 10)))
+    board.add(ReferenceBox(_REFERENCE_IMAGE, "mug", 0.0, 0.0, 5.0, 5.0), Image.new("RGB", (10, 10)))
     editor.refresh_references()
     assert _class_item(editor, 0).text(2) == "1"
     editor.set_image_prompt_supported(False)
@@ -146,18 +160,55 @@ def test_current_class_follows_the_current_row_or_its_parent(editor: ClassEditor
 def test_named_class_set_round_trip_replaces_classes(editor: ClassEditor, tmp_path: Path) -> None:
     editor.set_classes((ClassDefinition.named("cat"), ClassDefinition.parse("car: car, suv")))
     editor.save_class_set(" pets ")
-    saved_path: Path = tmp_path / "ovd_gui_data" / "classes" / "pets.txt"
-    assert saved_path.read_text(encoding="utf-8") == "cat\ncar: car, suv\n"
+    assert (tmp_path / "ovd_gui_data" / "classes" / "pets.ovdset").is_file()
     editor.set_classes((ClassDefinition.named("bird"),))
     editor.load_class_set("pets")
     assert _texts(editor) == ["cat", "car: car, suv"]
+
+
+def test_class_set_restores_reference_images_without_their_files(
+    editor: ClassEditor, board: ReferenceBoard, tmp_path: Path
+) -> None:
+    pixels: Image.Image = Image.new("RGB", (10, 10), (200, 30, 30))
+    reference_image: ReferenceImage = ReferenceImage.of("sedan.jpg", pixels)
+    editor.set_classes((ClassDefinition.parse("car: suv"), ClassDefinition.named("dog")))
+    board.add(ReferenceBox(reference_image, "car", 1.0, 2.0, 8.0, 9.0), pixels)
+    editor.save_class_set("vehicles")
+    board.clear()
+    editor.set_classes((ClassDefinition.named("bird"),))
+    editor.load_class_set("vehicles")
+    assert _texts(editor) == ["car: suv", "dog"]
+    assert board.boxes == (ReferenceBox(reference_image, "car", 1.0, 2.0, 8.0, 9.0),)
+    assert ReferenceImage.digest_of(board.pixels_of(reference_image)) == reference_image.digest
+    assert _child_texts(editor, 0) == ["suv", "sedan.jpg (1 box)"]
+
+
+def test_loading_a_class_set_replaces_the_reference_images(editor: ClassEditor, board: ReferenceBoard) -> None:
+    editor.set_classes((ClassDefinition.named("cat"),))
+    editor.save_class_set("plain")
+    board.add(ReferenceBox(_REFERENCE_IMAGE, "cat", 0.0, 0.0, 5.0, 5.0), Image.new("RGB", (10, 10)))
+    editor.load_class_set("plain")
+    assert board.is_empty
+
+
+def test_class_set_archive_file_replaces_classes(editor: ClassEditor, board: ReferenceBoard, tmp_path: Path) -> None:
+    editor.set_classes((ClassDefinition.named("mug"),))
+    board.add(ReferenceBox(_REFERENCE_IMAGE, "mug", 0.0, 0.0, 5.0, 5.0), Image.new("RGB", (10, 10)))
+    editor.save_class_set("kitchen")
+    shared_path: Path = tmp_path / "shared.ovdset"
+    (tmp_path / "ovd_gui_data" / "classes" / "kitchen.ovdset").rename(shared_path)
+    editor.clear()
+    editor.load_file(shared_path)
+    assert editor.class_names == ("mug",)
+    assert board.reference_images_of("mug") == (_REFERENCE_IMAGE,)
+    assert ClassSetArchive.is_archive_path(shared_path)
 
 
 def test_text_file_replaces_classes(editor: ClassEditor, tmp_path: Path) -> None:
     path: Path = tmp_path / "coco.names"
     path.write_text("person\ncar\n", encoding="utf-8")
     editor.set_classes((ClassDefinition.named("bird"),))
-    editor.load_file(ClassListFile(path))
+    editor.load_file(path)
     assert editor.class_names == ("person", "car")
 
 
@@ -166,7 +217,7 @@ def test_loading_a_file_without_classes_keeps_classes(editor: ClassEditor, tmp_p
     path.write_text("\n\n", encoding="utf-8")
     editor.set_classes((ClassDefinition.named("cat"),))
     with pytest.raises(ValueError):
-        editor.load_file(ClassListFile(path))
+        editor.load_file(path)
     assert editor.class_names == ("cat",)
 
 
@@ -210,7 +261,7 @@ def test_rejected_entry_is_reported_and_edited_again(application: QApplication, 
     editor.set_classes((ClassDefinition.parse("car: car, van"),))
     editor.start_new_row()
     _enter(application, editor, "van")
-    assert messages == ["'van' already queries the class 'car'."]
+    assert messages == ["'van' is already a prompt of the class 'car'."]
     line_edit: QLineEdit | None = _open_row_editor(editor)
     assert line_edit is not None
     assert line_edit.text() == "van"
@@ -264,13 +315,13 @@ def test_reference_images_move_between_classes_only(editor: ClassEditor, board: 
     messages: list[str] = []
     editor.message_posted.connect(messages.append)
     editor.set_classes((ClassDefinition.named("car"), ClassDefinition.named("truck")))
-    board.add(ReferenceBox(Path("a.jpg"), "car", 0.0, 0.0, 5.0, 5.0), Image.new("RGB", (10, 10)))
+    board.add(ReferenceBox(_REFERENCE_IMAGE, "car", 0.0, 0.0, 5.0, 5.0), Image.new("RGB", (10, 10)))
     editor.refresh_references()
     tree: ClassTree = _tree_of(editor)
     tree.drop_query(_child_item(editor, 0, 1), None, DropPosition.OnViewport)
     assert messages == ["A reference image cannot become a class; drop it on a class instead."]
     tree.drop_query(_child_item(editor, 0, 1), _child_item(editor, 1, 0), DropPosition.BelowItem)
-    assert board.reference_images_of("truck") == (Path("a.jpg"),)
+    assert board.reference_images_of("truck") == (_REFERENCE_IMAGE,)
     assert _child_texts(editor, 1) == ["truck", "a.jpg (1 box)"]
 
 
@@ -298,7 +349,7 @@ def test_image_action_adds_reference_images_to_the_current_class(
 
     def import_one_image(importer: ReferenceImageImporter, class_name: str, class_names: tuple[str, ...]) -> int:
         requested_names.append(class_name)
-        board.add(ReferenceBox(Path("a.jpg"), class_name, 0.0, 0.0, 5.0, 5.0), Image.new("RGB", (10, 10)))
+        board.add(ReferenceBox(_REFERENCE_IMAGE, class_name, 0.0, 0.0, 5.0, 5.0), Image.new("RGB", (10, 10)))
         return 1
 
     monkeypatch.setattr(ReferenceImageImporter, "import_images", import_one_image)
@@ -314,3 +365,80 @@ def test_image_action_adds_reference_images_to_the_current_class(
     assert messages == ["Added 1 reference image for 'dog'."]
     editor.set_image_prompt_supported(False)
     assert not image_button.isEnabled()
+
+
+def test_class_set_library_loads_the_chosen_set(
+    editor: ClassEditor, board: ReferenceBoard, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    editor.set_classes((ClassDefinition.named("mug"),))
+    board.add(ReferenceBox(_REFERENCE_IMAGE, "mug", 0.0, 0.0, 5.0, 5.0), Image.new("RGB", (10, 10)))
+    editor.save_class_set("kitchen")
+    editor.clear()
+    asked_names: list[str] = []
+
+    def choose_kitchen(dialog: ClassSetDialog, current_name: str) -> str | None:
+        asked_names.append(current_name)
+        return "kitchen"
+
+    monkeypatch.setattr(ClassSetDialog, "ask", choose_kitchen)
+    messages: list[str] = []
+    editor.message_posted.connect(messages.append)
+    editor._open_class_set_library()
+    assert asked_names == ["kitchen"]
+    assert editor.class_names == ("mug",)
+    assert board.reference_images_of("mug") == (_REFERENCE_IMAGE,)
+    assert messages == ["Loaded class set 'kitchen'."]
+
+
+def _set_combo_of(editor: ClassEditor) -> QComboBox:
+    combos: list[QComboBox] = editor.findChildren(QComboBox)
+    assert len(combos) == 1
+    return combos[0]
+
+
+def test_set_drop_down_lists_saved_sets_and_loads_the_chosen_one(editor: ClassEditor) -> None:
+    combo: QComboBox = _set_combo_of(editor)
+    assert combo.count() == 0
+    assert not combo.isEnabled()
+    editor.set_classes((ClassDefinition.named("cat"),))
+    editor.save_class_set("pets")
+    editor.set_classes((ClassDefinition.named("car"),))
+    editor.save_class_set("vehicles")
+    assert [combo.itemText(index) for index in range(combo.count())] == ["pets", "vehicles"]
+    assert combo.currentText() == "vehicles"
+    combo.activated.emit(0)
+    assert editor.class_names == ("cat",)
+    assert editor.class_set_name == "pets"
+    assert not editor.is_edited
+
+
+def test_edits_are_marked_and_confirmed_before_switching_sets(
+    editor: ClassEditor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    combo: QComboBox = _set_combo_of(editor)
+    editor.set_classes((ClassDefinition.named("cat"),))
+    editor.save_class_set("pets")
+    editor.set_classes((ClassDefinition.named("car"),))
+    editor.save_class_set("vehicles")
+    edited_label: QLabel = next(label for label in editor.findChildren(QLabel) if label.text() == "Edited")
+    assert edited_label.isHidden()
+    editor.set_classes((ClassDefinition.named("car"), ClassDefinition.named("bus")))
+    assert editor.is_edited
+    assert not edited_label.isHidden()
+    monkeypatch.setattr(QMessageBox, "question", lambda *arguments: QMessageBox.StandardButton.No)
+    combo.activated.emit(0)
+    assert editor.class_names == ("car", "bus")
+    assert combo.currentText() == "vehicles"
+    monkeypatch.setattr(QMessageBox, "question", lambda *arguments: QMessageBox.StandardButton.Yes)
+    combo.activated.emit(0)
+    assert editor.class_names == ("cat",)
+
+
+def test_classes_from_a_file_are_not_tied_to_a_set(editor: ClassEditor, tmp_path: Path) -> None:
+    editor.set_classes((ClassDefinition.named("cat"),))
+    editor.save_class_set("pets")
+    path: Path = tmp_path / "coco.names"
+    path.write_text("person\n", encoding="utf-8")
+    editor.load_file(path)
+    assert editor.class_set_name == ""
+    assert _set_combo_of(editor).currentIndex() == -1

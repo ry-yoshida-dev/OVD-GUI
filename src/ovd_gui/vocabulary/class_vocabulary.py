@@ -99,7 +99,7 @@ class ClassVocabulary:
         Raises
         ------
         ValueError
-            If a phrase already queries another class.
+            If a phrase is already a prompt of another class.
         """
         index: int | None = self.index_of(definition.name)
         if index is None:
@@ -122,7 +122,7 @@ class ClassVocabulary:
         Raises
         ------
         ValueError
-            If a class of the same name exists or a phrase already queries another class.
+            If a class of the same name exists or a phrase is already a prompt of another class.
         """
         if self.index_of(definition.name) is not None:
             raise ValueError(f"A class named '{definition.name}' already exists.")
@@ -143,7 +143,7 @@ class ClassVocabulary:
         Raises
         ------
         ValueError
-            If a phrase is invalid or already queries another class.
+            If a phrase is invalid or is already a prompt of another class.
         """
         self.insert_phrases(index, len(self._classes[index].text_queries), phrases)
 
@@ -163,7 +163,7 @@ class ClassVocabulary:
         Raises
         ------
         ValueError
-            If a phrase is invalid or already queries another class.
+            If a phrase is invalid or is already a prompt of another class.
         """
         definition: ClassDefinition = self._classes[index]
         own_phrases: set[str] = {phrase.casefold() for phrase in definition.text_queries}
@@ -330,4 +330,4 @@ class ClassVocabulary:
                     for definition in self._classes
                     if phrase.casefold() in {text_query.casefold() for text_query in definition.text_queries}
                 )
-                raise ValueError(f"'{phrase}' already queries the class '{owner}'.")
+                raise ValueError(f"'{phrase}' is already a prompt of the class '{owner}'.")

@@ -89,7 +89,8 @@ class DetectionWorker(QObject):
         Detect in every image of the batch, loading the model once if needed.
 
         Unreadable image files are skipped; an error of ``REPORTED_ERRORS`` while loading the model or detecting
-        stops the batch and is reported through ``batch_failed``. Cancellation is checked before each image.
+        stops the batch and is reported through ``batch_failed``. Cancellation and images prioritized from another
+        thread are checked before each image.
 
         Parameters
         ----------
@@ -101,9 +102,8 @@ class DetectionWorker(QObject):
         unreadable_paths: list[Path] = []
         if not self._session.is_loaded_for(request.settings):
             self.status_changed.emit(f"Loading {request.settings.weights_path} ...")
-        for processed_count, image_path in enumerate(request.image_paths):
-            if request.is_cancelled:
-                break
+        while (image_path := request.take_next_image()) is not None:
+            processed_count: int = detected_count + len(unreadable_paths)
             self.batch_progressed.emit(processed_count, total_count)
             try:
                 loaded_image: LoadedImage = LoadedImage.open(image_path)
@@ -115,6 +115,7 @@ class DetectionWorker(QObject):
                 outcome: DetectionOutcome = self._session.detect(
                     DetectionRequest(
                         settings=request.settings,
+                        image_path=image_path,
                         image=loaded_image.image,
                         labeled_prompt=request.labeled_prompt,
                     )

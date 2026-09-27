@@ -2,6 +2,7 @@ from dataclasses import replace
 
 from open_vocabulary_detector import DetectionThresholds, DetectorBackend, DetectorSettings, Device
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...detection import DeviceAvailability
 from ...preset import ModelPreset, PresetCatalog
 
 
@@ -19,7 +21,9 @@ class SettingsPanel(QWidget):
     Model selection from presets, with per-run overrides of device, precision and thresholds.
 
     Choosing a preset loads its ``DetectorSettings`` and fills every override with the preset values;
-    ``current_settings`` returns the preset settings with the overrides applied.
+    ``current_settings`` returns the preset settings with the overrides applied. float16 can be chosen only while the
+    selected device resolves to a GPU available on this machine; otherwise it is unchecked and disabled. Devices
+    missing on this machine are listed disabled, and a preset asking for one falls back to ``Device.AUTO``.
 
     Signals
     -------
@@ -32,17 +36,25 @@ class SettingsPanel(QWidget):
     THRESHOLD_STEP = 0.05
     THRESHOLD_DECIMALS = 3
 
-    def __init__(self, catalog: PresetCatalog, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        catalog: PresetCatalog,
+        device_availability: DeviceAvailability,
+        parent: QWidget | None = None,
+    ) -> None:
         """
         Parameters
         ----------
         catalog : PresetCatalog
             Presets to choose from.
+        device_availability : DeviceAvailability
+            GPU backends of this machine, deciding whether float16 can be chosen.
         parent : QWidget | None, optional
             Parent widget.
         """
         super().__init__(parent)
         self._catalog: PresetCatalog = catalog
+        self._device_availability: DeviceAvailability = device_availability
         self._backends: tuple[DetectorBackend, ...] = catalog.backends
         self._presets: tuple[ModelPreset, ...] = ()
         self._preset_settings: DetectorSettings | None = None
@@ -52,8 +64,8 @@ class SettingsPanel(QWidget):
         self._preset_combo: QComboBox = QComboBox()
         self._devices: tuple[Device, ...] = tuple(Device)
         self._device_combo: QComboBox = QComboBox()
-        self._device_combo.addItems([device.value for device in self._devices])
-        self._half_precision_check: QCheckBox = QCheckBox("float16 (GPU only)")
+        self._device_combo.setModel(self._device_model())
+        self._half_precision_check: QCheckBox = QCheckBox("float16")
         self._confidence_spin: QDoubleSpinBox = self._threshold_spin()
         self._nms_check: QCheckBox = QCheckBox("NMS IoU")
         self._nms_spin: QDoubleSpinBox = self._threshold_spin()
@@ -77,6 +89,8 @@ class SettingsPanel(QWidget):
 
         self._backend_combo.currentIndexChanged.connect(self._on_backend_changed)
         self._preset_combo.currentIndexChanged.connect(self._on_preset_changed)
+        self._device_combo.currentIndexChanged.connect(self._on_device_changed)
+        self._on_device_changed(self._device_combo.currentIndex())
         self._on_backend_changed(self._backend_combo.currentIndex())
 
     @property
@@ -143,6 +157,14 @@ class SettingsPanel(QWidget):
             ),
         )
 
+    def _device_model(self) -> QStandardItemModel:
+        model: QStandardItemModel = QStandardItemModel(self)
+        for device in self._devices:
+            item: QStandardItem = QStandardItem(device.value)
+            item.setEnabled(self._device_availability.is_available(device))
+            model.appendRow(item)
+        return model
+
     def _threshold_spin(self) -> QDoubleSpinBox:
         spin: QDoubleSpinBox = QDoubleSpinBox()
         spin.setRange(0.0, 1.0)
@@ -162,10 +184,19 @@ class SettingsPanel(QWidget):
     def _on_preset_changed(self, index: int) -> None:
         settings: DetectorSettings = self._presets[index].load_settings()
         self._preset_settings = settings
-        self._device_combo.setCurrentIndex(self._devices.index(settings.device))
-        self._half_precision_check.setChecked(settings.is_half_precision_enabled)
+        device: Device = settings.device if self._device_availability.is_available(settings.device) else Device.AUTO
+        self._device_combo.setCurrentIndex(self._devices.index(device))
+        self._half_precision_check.setChecked(
+            settings.is_half_precision_enabled and self._half_precision_check.isEnabled()
+        )
         self._confidence_spin.setValue(settings.thresholds.confidence_threshold)
         is_nms_enabled: bool = settings.thresholds.nms_iou_threshold is not None
         self._nms_check.setChecked(is_nms_enabled)
         self._nms_spin.setEnabled(is_nms_enabled)
         self._nms_spin.setValue(settings.thresholds.nms_iou_threshold or 0.5)
+
+    def _on_device_changed(self, index: int) -> None:
+        is_half_precision_supported: bool = self._device_availability.is_half_precision_supported(self._devices[index])
+        self._half_precision_check.setEnabled(is_half_precision_supported)
+        if not is_half_precision_supported:
+            self._half_precision_check.setChecked(False)

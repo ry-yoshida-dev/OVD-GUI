@@ -1,12 +1,10 @@
-from pathlib import Path
-
 import pytest
 from PIL import Image
 from PySide6.QtCore import QPoint, QRectF, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from ovd_gui.detection import ReferenceBox
+from ovd_gui.detection import ReferenceBox, ReferenceImage
 from ovd_gui.gui.class_palette import ClassPalette
 from ovd_gui.gui.viewer import ImageCanvas
 
@@ -53,7 +51,16 @@ def _show_editable_box(canvas: ImageCanvas) -> list[tuple[int, QRectF]]:
     canvas.reference_adjusted.connect(lambda index, rectangle: adjustments.append((index, rectangle)))
     canvas.set_drawing_enabled(True)
     canvas.show_references(
-        [ReferenceBox(image_path=Path("a.png"), class_name="dog", left=40.0, top=20.0, right=80.0, bottom=60.0)],
+        [
+            ReferenceBox(
+                reference_image=ReferenceImage.of("a.png", Image.new("RGB", (160, 120))),
+                class_name="dog",
+                left=40.0,
+                top=20.0,
+                right=80.0,
+                bottom=60.0,
+            )
+        ],
         ("dog",),
     )
     return adjustments

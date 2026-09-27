@@ -8,10 +8,11 @@ from .detection_runner import DetectionRunner
 
 class BatchProgressDialog(QProgressDialog):
     """
-    Window-modal progress of the batch running on a ``DetectionRunner``, with a Cancel button.
+    Window-modal progress of a blocking batch running on a ``DetectionRunner``, with a Cancel button.
 
-    The dialog follows the runner by itself: it opens when a batch starts, advances with it, and closes when the
-    batch finishes or fails. Cancel asks the runner to stop the batch.
+    The dialog follows the runner by itself: it opens when a blocking batch starts, advances with it, and closes when
+    the batch finishes or fails. Cancel asks the runner to stop the batch. Background batches are left to
+    ``RunProgressIndicator``.
     """
 
     def __init__(self, runner: DetectionRunner, parent: QWidget) -> None:
@@ -19,9 +20,9 @@ class BatchProgressDialog(QProgressDialog):
         Parameters
         ----------
         runner : DetectionRunner
-            Runner whose batches are shown.
+            Runner whose blocking batches are shown.
         parent : QWidget
-            Window blocked while a batch runs.
+            Window blocked while a blocking batch runs.
         """
         super().__init__(parent)
         self.setCancelButtonText("Cancel")
@@ -37,6 +38,8 @@ class BatchProgressDialog(QProgressDialog):
         self.reset()
 
     def _on_batch_started(self, job: BatchJob) -> None:
+        if not job.purpose.is_blocking:
+            return
         total_count: int = len(job.request.image_paths)
         self.setWindowTitle(job.purpose.title)
         self.setLabelText(job.purpose.progress_text(0, total_count))
@@ -44,6 +47,8 @@ class BatchProgressDialog(QProgressDialog):
         self.setValue(0)
 
     def _on_batch_progressed(self, job: BatchJob, processed_count: int, total_count: int) -> None:
+        if not job.purpose.is_blocking:
+            return
         self.setLabelText(job.purpose.progress_text(processed_count, total_count))
         self.setValue(processed_count)
 

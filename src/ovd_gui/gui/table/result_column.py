@@ -31,7 +31,7 @@ class ResultColumn(Enum):
             case ResultColumn.CLASS:
                 return "Class"
             case ResultColumn.QUERY:
-                return "Query"
+                return "Prompt"
             case ResultColumn.CONFIDENCE:
                 return "Confidence"
             case ResultColumn.X1:

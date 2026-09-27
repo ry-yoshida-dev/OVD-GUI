@@ -3,6 +3,7 @@ from .batch_progress_dialog import BatchProgressDialog
 from .batch_purpose import BatchPurpose
 from .detection_runner import DetectionRunner
 from .detection_worker import DetectionWorker
+from .run_progress_indicator import RunProgressIndicator
 
 __all__ = [
     "BatchJob",
@@ -10,4 +11,5 @@ __all__ = [
     "BatchPurpose",
     "DetectionRunner",
     "DetectionWorker",
+    "RunProgressIndicator",
 ]

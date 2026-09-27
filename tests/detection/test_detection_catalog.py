@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from open_vocabulary_detector import DetectionResult, ImageSize, Prompt, TextQuery
 
-from ovd_gui.detection import DetectionCatalog, DetectionFilter, DetectionRecord
+from ovd_gui.detection import DetectionCatalog, DetectionRecord
 
 PROMPT: Prompt = Prompt({"cat": (TextQuery("cat"),), "dog": (TextQuery("dog"), TextQuery("puppy"))})
 QUERY_LABELS: tuple[str, ...] = ("cat", "dog", "puppy")
@@ -52,45 +52,6 @@ def test_unknown_image_has_no_result_and_clear_forgets_everything() -> None:
     catalog.clear()
     assert catalog.result_of(Path("a.jpg")) is None
     assert catalog.records() == ()
-
-
-def test_filter_combines_image_class_name_and_confidence() -> None:
-    catalog: DetectionCatalog = DetectionCatalog()
-    catalog.record(
-        Path("/photos/Cat_01.jpg"), _result([[0, 0, 10, 10], [0, 0, 5, 5]], [0, 1], [0.9, 0.9]), QUERY_LABELS
-    )
-    catalog.record(
-        Path("/photos/street.jpg"), _result([[0, 0, 10, 10], [0, 0, 5, 5]], [0, 0], [0.8, 0.2]), QUERY_LABELS
-    )
-    records: tuple[DetectionRecord, ...] = catalog.records()
-
-    def accepted(detection_filter: DetectionFilter) -> list[tuple[str, int]]:
-        return [
-            (record.image_path.name, record.detection_index) for record in records if detection_filter.accepts(record)
-        ]
-
-    assert len(accepted(DetectionFilter())) == 4
-    assert accepted(DetectionFilter(class_names=frozenset({"cat"}))) == [
-        ("Cat_01.jpg", 0),
-        ("street.jpg", 0),
-        ("street.jpg", 1),
-    ]
-    assert accepted(DetectionFilter(class_names=frozenset({"cat"}), minimum_confidence=0.5)) == [
-        ("Cat_01.jpg", 0),
-        ("street.jpg", 0),
-    ]
-    assert len(accepted(DetectionFilter(class_names=frozenset({"cat", "dog"})))) == 4
-    assert accepted(DetectionFilter(image_name_text=" cat ")) == [("Cat_01.jpg", 0), ("Cat_01.jpg", 1)]
-    assert DetectionFilter(image_name_text="street").accepts_image_without_detections(Path("/photos/street.jpg"))
-    assert not DetectionFilter(image_name_text="cat").accepts_image_without_detections(Path("/photos/street.jpg"))
-    assert not DetectionFilter(class_names=frozenset({"cat"})).accepts_image_without_detections(
-        Path("/photos/street.jpg")
-    )
-
-
-def test_filter_rejects_confidence_outside_unit_range() -> None:
-    with pytest.raises(ValueError, match="minimum_confidence"):
-        DetectionFilter(minimum_confidence=1.5)
 
 
 def test_query_labels_must_match_the_prompt() -> None:
