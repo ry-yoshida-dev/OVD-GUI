@@ -11,8 +11,9 @@ class ReferenceImageDialog(QDialog):
     """
     Modal dialog marking the examples of one class on a reference image.
 
-    Dragging draws boxes around examples; accepting without any box uses the whole image, which suits an image
-    already cropped to the example. Reference images are separate from the images to analyze.
+    Dragging draws boxes around examples; a drawn box is moved by dragging inside it and resized by its round corner
+    handles. Accepting without any box uses the whole image, which suits an image already cropped to the example.
+    Reference images are separate from the images to analyze.
     """
 
     WINDOW_TITLE = "Reference Image"
@@ -42,6 +43,7 @@ class ReferenceImageDialog(QDialog):
         self._canvas.setAcceptDrops(False)
         self._canvas.set_drawing_enabled(True)
         self._canvas.rectangle_drawn.connect(self._on_rectangle_drawn)
+        self._canvas.reference_adjusted.connect(self._on_reference_adjusted)
 
         self._undo_button: QPushButton = QPushButton("Undo Box")
         self._undo_button.clicked.connect(self._undo_box)
@@ -109,7 +111,8 @@ class ReferenceImageDialog(QDialog):
         self._boxes = []
         self.setWindowTitle(f"{self.WINDOW_TITLE}: {class_name} · {loaded_image.path.name}")
         self._instruction_label.setText(
-            f"Drag boxes around examples of '{class_name}'. " + "Without a box the whole image is used as the example."
+            f"Drag boxes around examples of '{class_name}'; drag a box to move it or its corners to resize it. "
+            + "Without a box the whole image is used as the example."
         )
         self._canvas.set_image(loaded_image.image)
         self._show_boxes()
@@ -151,6 +154,19 @@ class ReferenceImageDialog(QDialog):
                 right=rectangle.right(),
                 bottom=rectangle.bottom(),
             )
+        )
+        self._show_boxes()
+
+    def _on_reference_adjusted(self, box_index: int, rectangle: QRectF) -> None:
+        if not 0 <= box_index < len(self._boxes):
+            return
+        self._boxes[box_index] = ReferenceBox(
+            image_path=self._boxes[box_index].image_path,
+            class_name=self._boxes[box_index].class_name,
+            left=rectangle.left(),
+            top=rectangle.top(),
+            right=rectangle.right(),
+            bottom=rectangle.bottom(),
         )
         self._show_boxes()
 

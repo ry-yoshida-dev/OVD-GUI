@@ -107,3 +107,12 @@ def test_reference_images_are_listed_and_removed_per_class() -> None:
     assert board.reference_images_of("cat") == (Path("a.jpg"),)
     board.clear()
     assert board.is_empty
+
+
+def test_reference_image_moves_to_another_class() -> None:
+    board: ReferenceBoard = ReferenceBoard()
+    board.add(_box("car"), _image())
+    board.add(_box("car", image_path=Path("b.jpg")), _image())
+    board.move_reference_image("car", Path("a.jpg"), "truck")
+    assert board.reference_images_of("car") == (Path("b.jpg"),)
+    assert board.reference_images_of("truck") == (Path("a.jpg"),)

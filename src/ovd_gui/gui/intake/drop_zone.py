@@ -7,10 +7,10 @@ from ...media import LoadedImage
 
 class DropZone(QWidget):
     """
-    Placeholder shown instead of the image while no image is open.
+    Placeholder inviting the user to drop images or folders, with buttons for the file dialogs.
 
-    It invites the user to drop images or folders and offers buttons for the file dialogs.
-    Drops themselves are handled by the window.
+    Shown instead of the image while no image is open, and in the reference image picker.
+    Drops themselves are handled by the enclosing window.
 
     Signals
     -------
@@ -23,14 +23,17 @@ class DropZone(QWidget):
     open_images_requested: Signal = Signal()
     open_folder_requested: Signal = Signal()
 
+    DEFAULT_TITLE = "Drop images or folders here"
     MARGIN = 24
     CORNER_RADIUS = 16.0
     GLYPH_SIZE = 96
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, title: str = DEFAULT_TITLE, parent: QWidget | None = None) -> None:
         """
         Parameters
         ----------
+        title : str, optional
+            Invitation shown above the supported formats.
         parent : QWidget | None, optional
             Parent widget.
         """
@@ -38,7 +41,7 @@ class DropZone(QWidget):
         self._glyph_slot: QWidget = QWidget()
         self._glyph_slot.setFixedSize(self.GLYPH_SIZE, self.GLYPH_SIZE)
 
-        title_label: QLabel = QLabel("Drop images or folders here")
+        title_label: QLabel = QLabel(title)
         title_font: QFont = QFont(title_label.font())
         title_font.setPointSizeF(title_font.pointSizeF() * 1.6)
         title_font.setWeight(QFont.Weight.DemiBold)

@@ -1,19 +1,20 @@
 from pathlib import Path
 
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
+from PySide6.QtWidgets import QMessageBox, QWidget
 
 from ...detection import ReferenceBoard, ReferenceBox
 from ...media import LoadedImage
 from ..class_palette import ClassPalette
 from .reference_image_dialog import ReferenceImageDialog
+from .reference_source_dialog import ReferenceSourceDialog
 
 
 class ReferenceImageImporter:
     """
-    Interactive addition of reference images to a class: pick image files, then box the examples of each one.
+    Interactive addition of reference images to a class: drop or pick images, then box the examples of each one.
 
     Each accepted image adds its boxes to the reference board; cancelling the box dialog stops before the remaining
-    files. The directory of the last pick is offered again next time.
+    files.
     """
 
     def __init__(self, palette: ClassPalette, reference_board: ReferenceBoard, parent: QWidget) -> None:
@@ -25,12 +26,12 @@ class ReferenceImageImporter:
         reference_board : ReferenceBoard
             Board receiving the boxes.
         parent : QWidget
-            Parent of the file and box dialogs.
+            Parent of the source and box dialogs.
         """
         self._board: ReferenceBoard = reference_board
         self._parent: QWidget = parent
+        self._source_dialog: ReferenceSourceDialog = ReferenceSourceDialog(parent)
         self._dialog: ReferenceImageDialog = ReferenceImageDialog(palette, parent)
-        self._last_directory: Path = Path.cwd()
 
     def import_images(self, class_name: str, class_names: tuple[str, ...]) -> int:
         """
@@ -48,18 +49,9 @@ class ReferenceImageImporter:
         int
             Number of images added.
         """
-        file_names, _ = QFileDialog.getOpenFileNames(
-            self._parent,
-            f"Reference Images of '{class_name}'",
-            str(self._last_directory),
-            f"Images ({LoadedImage.suffix_patterns()})",
-        )
-        if not file_names:
-            return 0
-        self._last_directory = Path(file_names[0]).parent
+        image_paths: tuple[Path, ...] = self._source_dialog.ask(class_name)
         added_image_count: int = 0
-        for file_name in file_names:
-            path: Path = Path(file_name)
+        for path in image_paths:
             try:
                 reference_image: LoadedImage = LoadedImage.open(path)
             except OSError as error:

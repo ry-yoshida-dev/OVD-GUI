@@ -2,14 +2,17 @@ from pathlib import Path
 
 import pytest
 from PIL import Image
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLineEdit, QPushButton, QTreeWidget, QTreeWidgetItem
+from PySide6.QtWidgets import QAbstractItemView, QApplication, QLineEdit, QToolButton, QTreeWidgetItem
 
 from ovd_gui.detection import ReferenceBoard, ReferenceBox
 from ovd_gui.gui.class_palette import ClassPalette
-from ovd_gui.gui.prompt import ClassEditor, ReferenceImageImporter
+from ovd_gui.gui.prompt import ClassEditor, ClassTree, ReferenceImageImporter
 from ovd_gui.vocabulary import ClassDefinition, ClassListFile, ClassListStore
+
+EVENT_WAIT_MILLISECONDS = 20
+DropPosition = QAbstractItemView.DropIndicatorPosition
 
 
 @pytest.fixture
@@ -19,23 +22,35 @@ def board() -> ReferenceBoard:
 
 @pytest.fixture
 def editor(application: QApplication, tmp_path: Path, board: ReferenceBoard) -> ClassEditor:
-    return ClassEditor(ClassPalette(), ClassListStore(tmp_path / "ovd_gui_data"), board)
+    class_editor: ClassEditor = ClassEditor(ClassPalette(), ClassListStore(tmp_path / "ovd_gui_data"), board)
+    class_editor.resize(320, 400)
+    class_editor.show()
+    return class_editor
 
 
-def _input_of(editor: ClassEditor) -> QLineEdit:
-    input_edit: QLineEdit | None = editor.findChild(QLineEdit)
-    assert input_edit is not None
-    return input_edit
+def _open_row_editor(editor: ClassEditor) -> QLineEdit | None:
+    line_edits: list[QLineEdit] = [
+        line_edit for line_edit in _tree_of(editor).viewport().findChildren(QLineEdit) if line_edit.isVisible()
+    ]
+    return line_edits[0] if line_edits else None
 
 
-def _tree_of(editor: ClassEditor) -> QTreeWidget:
-    tree: QTreeWidget | None = editor.findChild(QTreeWidget)
+def _enter(application: QApplication, editor: ClassEditor, text: str, key: Qt.Key = Qt.Key.Key_Return) -> None:
+    line_edit: QLineEdit | None = _open_row_editor(editor)
+    assert line_edit is not None
+    QTest.keyClicks(line_edit, text)
+    QTest.keyClick(line_edit, key)
+    QTest.qWait(EVENT_WAIT_MILLISECONDS)
+
+
+def _tree_of(editor: ClassEditor) -> ClassTree:
+    tree: ClassTree | None = editor.findChild(ClassTree)
     assert tree is not None
     return tree
 
 
-def _button_of(editor: ClassEditor, text: str) -> QPushButton:
-    buttons: list[QPushButton] = [button for button in editor.findChildren(QPushButton) if button.text() == text]
+def _button_of(editor: ClassEditor, text: str) -> QToolButton:
+    buttons: list[QToolButton] = [button for button in editor.findChildren(QToolButton) if button.text() == text]
     assert len(buttons) == 1
     return buttons[0]
 
@@ -61,37 +76,12 @@ def _texts(editor: ClassEditor) -> list[str]:
     return [definition.text for definition in editor.classes]
 
 
-def _type(editor: ClassEditor, text: str) -> None:
-    input_edit: QLineEdit = _input_of(editor)
-    QTest.keyClicks(input_edit, text)
-    QTest.keyClick(input_edit, Qt.Key.Key_Return)
-
-
 def test_class_rows_show_id_and_query_count_with_phrases_as_children(editor: ClassEditor) -> None:
     editor.set_classes((ClassDefinition.parse("car: car, suv, taxi"), ClassDefinition.named("dog")))
     assert _class_item(editor, 1).text(1) == "1"
     assert _class_item(editor, 0).text(2) == "3"
     assert _child_texts(editor, 0) == ["car", "suv", "taxi"]
     assert _child_texts(editor, 1) == ["dog"]
-
-
-def test_enter_adds_named_classes_or_one_class_with_phrases(editor: ClassEditor) -> None:
-    _type(editor, "cat, traffic cone")
-    _type(editor, "car: car, suv")
-    _type(editor, "CAR: taxi")
-    assert _texts(editor) == ["cat", "traffic cone", "car: car, suv, taxi"]
-    assert _input_of(editor).text() == ""
-    assert _class_item(editor, 2).isExpanded()
-
-
-def test_input_reusing_a_phrase_of_another_class_is_kept_with_a_notice(editor: ClassEditor) -> None:
-    messages: list[str] = []
-    editor.message_posted.connect(messages.append)
-    _type(editor, "car: car, van")
-    _type(editor, "van")
-    assert _texts(editor) == ["car: car, van"]
-    assert _input_of(editor).text() == "van"
-    assert messages == ["'van' already queries the class 'car'."]
 
 
 def test_editing_a_class_renames_it_and_its_named_phrase(editor: ClassEditor, board: ReferenceBoard) -> None:
@@ -122,7 +112,7 @@ def test_delete_removes_selected_classes_phrases_and_reference_images(
     board.add(ReferenceBox(Path("a.jpg"), "dog", 0.0, 0.0, 5.0, 5.0), Image.new("RGB", (10, 10)))
     editor.refresh_references()
     assert _child_texts(editor, 1) == ["dog", "puppy", "a.jpg (1 box)"]
-    tree: QTreeWidget = _tree_of(editor)
+    tree: ClassTree = _tree_of(editor)
     _child_item(editor, 1, 0).setSelected(True)
     _child_item(editor, 1, 2).setSelected(True)
     QTest.keyClick(tree, Qt.Key.Key_Delete)
@@ -146,28 +136,11 @@ def test_reference_images_are_greyed_out_without_image_prompt_support(
     assert "Ignored" in _child_item(editor, 0, 0).toolTip(0)
 
 
-def test_enter_on_empty_input_requests_detection(editor: ClassEditor) -> None:
-    requests: list[bool] = []
-    editor.detection_requested.connect(lambda: requests.append(True))
-    QTest.keyClick(_input_of(editor), Qt.Key.Key_Return)
-    assert requests == [True]
-
-
 def test_current_class_follows_the_current_row_or_its_parent(editor: ClassEditor) -> None:
     editor.set_classes((ClassDefinition.named("cat"), ClassDefinition.parse("dog: dog, puppy")))
     assert editor.current_class_name is None
     _tree_of(editor).setCurrentItem(_child_item(editor, 1, 1))
     assert editor.current_class_name == "dog"
-
-
-def test_add_phrases_extends_a_class(editor: ClassEditor) -> None:
-    editor.set_classes((ClassDefinition.named("car"), ClassDefinition.named("bus")))
-    editor.add_phrases("car", "suv, taxi, CAR")
-    assert _texts(editor) == ["car: car, suv, taxi", "bus"]
-    with pytest.raises(ValueError):
-        editor.add_phrases("car", "bus")
-    with pytest.raises(KeyError):
-        editor.add_phrases("truck", "lorry")
 
 
 def test_named_class_set_round_trip_replaces_classes(editor: ClassEditor, tmp_path: Path) -> None:
@@ -197,7 +170,128 @@ def test_loading_a_file_without_classes_keeps_classes(editor: ClassEditor, tmp_p
     assert editor.class_names == ("cat",)
 
 
-def test_query_buttons_act_on_the_current_class(
+def test_plus_without_selection_appends_a_class(application: QApplication, editor: ClassEditor) -> None:
+    editor.set_classes((ClassDefinition.named("cat"),))
+    _button_of(editor, "+ Text").click()
+    _enter(application, editor, "  traffic   cone ")
+    _tree_of(editor).clearSelection()
+    _button_of(editor, "+ Text").click()
+    _enter(application, editor, "car: car, suv")
+    assert _texts(editor) == ["cat", "traffic cone", "car: car, suv"]
+    assert _class_item(editor, 2).isExpanded()
+    assert editor.current_class_name == "car"
+    assert _open_row_editor(editor) is None
+
+
+def test_plus_on_a_selected_class_inserts_a_class_after_it(application: QApplication, editor: ClassEditor) -> None:
+    editor.set_classes((ClassDefinition.named("cat"), ClassDefinition.named("dog")))
+    _tree_of(editor).setCurrentItem(_class_item(editor, 0))
+    _button_of(editor, "+ Text").click()
+    assert _class_item(editor, 1).text(0) == ""
+    _enter(application, editor, "bird")
+    assert _texts(editor) == ["cat", "bird", "dog"]
+    assert _class_item(editor, 2).text(1) == "2"
+
+
+def test_plus_on_a_selected_query_inserts_a_phrase_after_it(application: QApplication, editor: ClassEditor) -> None:
+    editor.set_classes((ClassDefinition.parse("car: car, van"), ClassDefinition.named("bus")))
+    _class_item(editor, 0).setExpanded(True)
+    _tree_of(editor).setCurrentItem(_child_item(editor, 0, 0))
+    _button_of(editor, "+ Text").click()
+    assert _child_texts(editor, 0) == ["car", "", "van"]
+    _enter(application, editor, "suv, taxi, CAR")
+    assert _texts(editor) == ["car: car, suv, taxi, van", "bus"]
+    assert _tree_of(editor).currentItem() is _child_item(editor, 0, 1)
+
+
+def test_rejected_entry_is_reported_and_edited_again(application: QApplication, editor: ClassEditor) -> None:
+    messages: list[str] = []
+    editor.message_posted.connect(messages.append)
+    editor.set_classes((ClassDefinition.parse("car: car, van"),))
+    editor.start_new_row()
+    _enter(application, editor, "van")
+    assert messages == ["'van' already queries the class 'car'."]
+    line_edit: QLineEdit | None = _open_row_editor(editor)
+    assert line_edit is not None
+    assert line_edit.text() == "van"
+    QTest.keyClick(line_edit, Qt.Key.Key_Escape)
+    QTest.qWait(EVENT_WAIT_MILLISECONDS)
+    assert _texts(editor) == ["car: car, van"]
+    assert _tree_of(editor).topLevelItemCount() == 1
+
+
+def test_empty_or_cancelled_rows_are_dropped(application: QApplication, editor: ClassEditor) -> None:
+    editor.set_classes((ClassDefinition.named("cat"),))
+    editor.start_new_row()
+    _enter(application, editor, "  ")
+    _tree_of(editor).setCurrentItem(_child_item(editor, 0, 0))
+    editor.start_new_row()
+    _enter(application, editor, "kitten", key=Qt.Key.Key_Escape)
+    assert _texts(editor) == ["cat"]
+    assert _child_texts(editor, 0) == ["cat"]
+
+
+def test_dropping_a_phrase_on_another_class_moves_it(editor: ClassEditor) -> None:
+    editor.set_classes((ClassDefinition.parse("car: car, van"), ClassDefinition.named("truck")))
+    tree: ClassTree = _tree_of(editor)
+    tree.drop_query(_child_item(editor, 0, 1), _class_item(editor, 1), DropPosition.OnItem)
+    assert _texts(editor) == ["car", "truck: truck, van"]
+    assert tree.currentItem() is _child_item(editor, 1, 1)
+
+
+def test_dropping_a_phrase_among_queries_reorders_it(editor: ClassEditor) -> None:
+    editor.set_classes((ClassDefinition.parse("car: car, suv, van"),))
+    tree: ClassTree = _tree_of(editor)
+    tree.drop_query(_child_item(editor, 0, 2), _child_item(editor, 0, 0), DropPosition.AboveItem)
+    assert _texts(editor) == ["car: van, car, suv"]
+    tree.drop_query(_child_item(editor, 0, 0), _child_item(editor, 0, 2), DropPosition.BelowItem)
+    assert _texts(editor) == ["car: car, suv, van"]
+
+
+def test_dropping_a_phrase_between_classes_makes_it_a_class(editor: ClassEditor) -> None:
+    messages: list[str] = []
+    editor.message_posted.connect(messages.append)
+    editor.set_classes((ClassDefinition.parse("car: car, van"), ClassDefinition.named("truck")))
+    tree: ClassTree = _tree_of(editor)
+    tree.drop_query(_child_item(editor, 0, 1), _class_item(editor, 1), DropPosition.AboveItem)
+    assert _texts(editor) == ["car", "van", "truck"]
+    tree.drop_query(_child_item(editor, 2, 0), None, DropPosition.OnViewport)
+    assert messages == ["A class named 'truck' already exists."]
+    assert _texts(editor) == ["car", "van", "truck"]
+
+
+def test_reference_images_move_between_classes_only(editor: ClassEditor, board: ReferenceBoard) -> None:
+    messages: list[str] = []
+    editor.message_posted.connect(messages.append)
+    editor.set_classes((ClassDefinition.named("car"), ClassDefinition.named("truck")))
+    board.add(ReferenceBox(Path("a.jpg"), "car", 0.0, 0.0, 5.0, 5.0), Image.new("RGB", (10, 10)))
+    editor.refresh_references()
+    tree: ClassTree = _tree_of(editor)
+    tree.drop_query(_child_item(editor, 0, 1), None, DropPosition.OnViewport)
+    assert messages == ["A reference image cannot become a class; drop it on a class instead."]
+    tree.drop_query(_child_item(editor, 0, 1), _child_item(editor, 1, 0), DropPosition.BelowItem)
+    assert board.reference_images_of("truck") == (Path("a.jpg"),)
+    assert _child_texts(editor, 1) == ["truck", "a.jpg (1 box)"]
+
+
+def test_double_click_below_the_rows_starts_a_new_class(application: QApplication, editor: ClassEditor) -> None:
+    editor.set_classes((ClassDefinition.named("cat"),))
+    tree: ClassTree = _tree_of(editor)
+    QTest.mouseDClick(tree.viewport(), Qt.MouseButton.LeftButton, pos=QPoint(20, tree.viewport().height() - 5))
+    _enter(application, editor, "dog")
+    assert _texts(editor) == ["cat", "dog"]
+
+
+def test_trash_button_removes_the_selected_rows(editor: ClassEditor) -> None:
+    editor.set_classes((ClassDefinition.named("cat"), ClassDefinition.parse("dog: dog, puppy")))
+    remove_button: QToolButton = _button_of(editor, "Remove")
+    assert not remove_button.isEnabled()
+    _child_item(editor, 1, 1).setSelected(True)
+    remove_button.click()
+    assert _texts(editor) == ["cat", "dog"]
+
+
+def test_image_action_adds_reference_images_to_the_current_class(
     editor: ClassEditor, board: ReferenceBoard, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     requested_names: list[str] = []
@@ -211,15 +305,12 @@ def test_query_buttons_act_on_the_current_class(
     editor.set_classes((ClassDefinition.named("cat"), ClassDefinition.named("dog")))
     messages: list[str] = []
     editor.message_posted.connect(messages.append)
-    reference_button: QPushButton = _button_of(editor, "Add Images...")
-    phrase_button: QPushButton = _button_of(editor, "Add Phrases...")
-    assert not reference_button.isEnabled()
-    assert not phrase_button.isEnabled()
+    image_button: QToolButton = _button_of(editor, "+ Image")
+    assert not image_button.isEnabled()
     _tree_of(editor).setCurrentItem(_class_item(editor, 1))
-    assert phrase_button.isEnabled()
-    reference_button.click()
+    image_button.click()
     assert requested_names == ["dog"]
     assert _child_texts(editor, 1) == ["dog", "a.jpg (1 box)"]
     assert messages == ["Added 1 reference image for 'dog'."]
     editor.set_image_prompt_supported(False)
-    assert not reference_button.isEnabled()
+    assert not image_button.isEnabled()

@@ -103,11 +103,31 @@ class ClassVocabulary:
         """
         index: int | None = self.index_of(definition.name)
         if index is None:
-            self._check_phrases_are_free(definition.text_queries, ignored_index=None)
-            self._classes.append(definition)
+            self.insert(len(self._classes), definition)
             return len(self._classes) - 1
         self.add_phrases(index, definition.text_queries)
         return index
+
+    def insert(self, position: int, definition: ClassDefinition) -> None:
+        """
+        Insert a new class; it and the classes after it are renumbered.
+
+        Parameters
+        ----------
+        position : int
+            Class id of the new class; clamped to the end.
+        definition : ClassDefinition
+            Class to insert.
+
+        Raises
+        ------
+        ValueError
+            If a class of the same name exists or a phrase already queries another class.
+        """
+        if self.index_of(definition.name) is not None:
+            raise ValueError(f"A class named '{definition.name}' already exists.")
+        self._check_phrases_are_free(definition.text_queries, ignored_index=None)
+        self._classes.insert(position, definition)
 
     def add_phrases(self, index: int, phrases: Iterable[str]) -> None:
         """
@@ -125,6 +145,26 @@ class ClassVocabulary:
         ValueError
             If a phrase is invalid or already queries another class.
         """
+        self.insert_phrases(index, len(self._classes[index].text_queries), phrases)
+
+    def insert_phrases(self, index: int, position: int, phrases: Iterable[str]) -> None:
+        """
+        Insert phrases into one class at a position, skipping those it already has.
+
+        Parameters
+        ----------
+        index : int
+            Class id.
+        position : int
+            Position of the first new phrase within the class; clamped to the end.
+        phrases : Iterable[str]
+            Phrases to add.
+
+        Raises
+        ------
+        ValueError
+            If a phrase is invalid or already queries another class.
+        """
         definition: ClassDefinition = self._classes[index]
         own_phrases: set[str] = {phrase.casefold() for phrase in definition.text_queries}
         new_phrases: list[str] = []
@@ -134,7 +174,60 @@ class ClassVocabulary:
                 own_phrases.add(phrase.casefold())
                 new_phrases.append(phrase)
         self._check_phrases_are_free(new_phrases, ignored_index=index)
-        self._classes[index] = definition.with_text_queries((*definition.text_queries, *new_phrases))
+        phrases_before: tuple[str, ...] = definition.text_queries[:position]
+        phrases_after: tuple[str, ...] = definition.text_queries[position:]
+        self._classes[index] = definition.with_text_queries((*phrases_before, *new_phrases, *phrases_after))
+
+    def move_phrase(self, index: int, phrase_index: int, target_index: int, position: int) -> None:
+        """
+        Move one phrase to a position in the same or another class.
+
+        Parameters
+        ----------
+        index : int
+            Class id the phrase belongs to.
+        phrase_index : int
+            Position of the phrase in its class.
+        target_index : int
+            Class id to move the phrase to.
+        position : int
+            Position of the phrase in the target class, counted before the phrase is taken out.
+        """
+        phrase: str = self._classes[index].text_queries[phrase_index]
+        self.remove_phrases(index, (phrase_index,))
+        if index == target_index and position > phrase_index:
+            position -= 1
+        self.insert_phrases(target_index, position, (phrase,))
+
+    def promote_phrase(self, index: int, phrase_index: int, position: int) -> int:
+        """
+        Turn one phrase into a class of its own, queried by the phrase.
+
+        Parameters
+        ----------
+        index : int
+            Class id the phrase belongs to.
+        phrase_index : int
+            Position of the phrase in its class.
+        position : int
+            Class id of the new class; clamped to the end.
+
+        Returns
+        -------
+        int
+            Class id of the new class.
+
+        Raises
+        ------
+        ValueError
+            If a class is already named like the phrase; nothing changes then.
+        """
+        phrase: str = self._classes[index].text_queries[phrase_index]
+        if self.index_of(phrase) is not None:
+            raise ValueError(f"A class named '{phrase}' already exists.")
+        self.remove_phrases(index, (phrase_index,))
+        self.insert(position, ClassDefinition.named(phrase))
+        return min(position, len(self._classes) - 1)
 
     def rename_class(self, index: int, name: str) -> ClassDefinition:
         """

@@ -8,4 +8,4 @@ Tests of `ovd_gui.gui.viewer`.
 
 | Component | Description |
 | --------- | ----------- |
-| [test_image_canvas.py](./test_image_canvas.py) | Drawing reference rectangles on the canvas. |
+| [test_image_canvas.py](./test_image_canvas.py) | Drawing reference rectangles on the canvas, and moving and resizing reference boxes by their body and corner handles. |

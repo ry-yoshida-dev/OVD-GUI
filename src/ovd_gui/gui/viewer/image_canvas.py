@@ -8,6 +8,8 @@ from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsS
 
 from ...detection import ReferenceBox
 from ..class_palette import ClassPalette
+from .box_grab import BoxGrab
+from .box_grab_kind import BoxGrabKind
 from .detection_box_item import DetectionBoxItem
 from .reference_box_item import ReferenceBoxItem
 
@@ -17,18 +19,24 @@ class ImageCanvas(QGraphicsView):
     Zoomable view of an image with detection and reference boxes drawn over it.
 
     The image fits the view until the user zooms with the mouse wheel; double-click fits it again.
-    While drawing is enabled, dragging with the left button draws a rectangle instead of panning.
+    While drawing is enabled, dragging with the left button draws a rectangle instead of panning, and the reference
+    boxes become editable: dragging a round corner handle resizes a box and dragging inside a box moves it.
 
     Signals
     -------
     rectangle_drawn : Signal(QRectF)
         A rectangle was drawn, in image pixel coordinates clamped to the image.
+    reference_adjusted : Signal(int, QRectF)
+        A reference box was moved or resized: its index among the boxes last shown and its new rectangle, in image
+        pixel coordinates clamped to the image.
     """
 
     rectangle_drawn: Signal = Signal(QRectF)
+    reference_adjusted: Signal = Signal(int, QRectF)
 
     ZOOM_STEP = 1.25
     MINIMUM_RECTANGLE_SIZE = 4.0
+    HANDLE_GRAB_DISTANCE = 9.0
     RUBBER_BAND_COLOR = QColor("#ffffff")
 
     def __init__(self, palette: ClassPalette, parent: QWidget | None = None) -> None:
@@ -46,6 +54,10 @@ class ImageCanvas(QGraphicsView):
         self._pixmap_item: QGraphicsPixmapItem | None = None
         self._box_items: list[DetectionBoxItem] = []
         self._reference_items: list[ReferenceBoxItem] = []
+        self._reference_box_indices: list[int] = []
+        self._shown_references: tuple[ReferenceBox, ...] = ()
+        self._shown_class_names: tuple[str, ...] = ()
+        self._grab: BoxGrab | None = None
         self._rubber_band: QGraphicsRectItem | None = None
         self._drag_origin: QPointF = QPointF()
         self._is_drawing_enabled: bool = False
@@ -56,6 +68,7 @@ class ImageCanvas(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setBackgroundBrush(Qt.GlobalColor.darkGray)
+        self.viewport().setMouseTracking(True)
 
     def set_image(self, image: Image.Image) -> None:
         """
@@ -69,6 +82,9 @@ class ImageCanvas(QGraphicsView):
         self._scene.clear()
         self._box_items = []
         self._reference_items = []
+        self._reference_box_indices = []
+        self._shown_references = ()
+        self._grab = None
         self._rubber_band = None
         self._pixmap_item = self._scene.addPixmap(QPixmap.fromImage(self._to_qimage(image)))
         self._scene.setSceneRect(self._pixmap_item.boundingRect())
@@ -99,7 +115,7 @@ class ImageCanvas(QGraphicsView):
 
     def show_references(self, boxes: Sequence[ReferenceBox], class_names: tuple[str, ...]) -> None:
         """
-        Replace the drawn reference boxes.
+        Replace the drawn reference boxes; they are editable while drawing is enabled.
 
         Parameters
         ----------
@@ -111,26 +127,32 @@ class ImageCanvas(QGraphicsView):
         for previous_item in self._reference_items:
             self._scene.removeItem(previous_item)
         self._reference_items = []
-        for box in boxes:
+        self._reference_box_indices = []
+        self._shown_references = tuple(boxes)
+        self._shown_class_names = class_names
+        self._grab = None
+        for box_index, box in enumerate(self._shown_references):
             if box.class_name not in class_names:
                 continue
             reference_item: ReferenceBoxItem = ReferenceBoxItem(
-                box, self._palette.color_of(class_names.index(box.class_name))
+                box, self._palette.color_of(class_names.index(box.class_name)), self._is_drawing_enabled
             )
             self._scene.addItem(reference_item)
             self._reference_items.append(reference_item)
+            self._reference_box_indices.append(box_index)
 
     def set_drawing_enabled(self, is_enabled: bool) -> None:
         """
-        Switch left-button dragging between drawing rectangles and panning.
+        Switch left-button dragging between drawing and editing rectangles, and panning.
 
         Parameters
         ----------
         is_enabled : bool
-            Whether dragging draws rectangles.
+            Whether dragging draws rectangles and edits the reference boxes.
         """
         self._is_drawing_enabled = is_enabled
         self._discard_rubber_band()
+        self.show_references(self._shown_references, self._shown_class_names)
         self.setDragMode(QGraphicsView.DragMode.NoDrag if is_enabled else QGraphicsView.DragMode.ScrollHandDrag)
         if is_enabled:
             self.viewport().setCursor(Qt.CursorShape.CrossCursor)
@@ -179,6 +201,9 @@ class ImageCanvas(QGraphicsView):
             super().mousePressEvent(event)
             return
         self._discard_rubber_band()
+        self._grab = self._grab_at(event.position())
+        if self._grab is not None:
+            return
         self._drag_origin = self._clamped_scene_position(event)
         pen: QPen = QPen(self.RUBBER_BAND_COLOR)
         pen.setCosmetic(True)
@@ -187,12 +212,20 @@ class ImageCanvas(QGraphicsView):
         self._rubber_band.setZValue(3.0)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._grab is not None:
+            self._reference_items[self._grab.item_position].set_rectangle(self._dragged_rectangle(self._grab, event))
+            return
         if self._rubber_band is None:
+            if self._is_drawing_enabled:
+                self.viewport().setCursor(self._cursor_for(self._grab_at(event.position())))
             super().mouseMoveEvent(event)
             return
         self._rubber_band.setRect(QRectF(self._drag_origin, self._clamped_scene_position(event)).normalized())
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._grab is not None and event.button() == Qt.MouseButton.LeftButton:
+            self._release_grab(self._grab, event)
+            return
         if self._rubber_band is None or event.button() != Qt.MouseButton.LeftButton:
             super().mouseReleaseEvent(event)
             return
@@ -214,6 +247,66 @@ class ImageCanvas(QGraphicsView):
             min(max(position.x(), bounds.left()), bounds.right()),
             min(max(position.y(), bounds.top()), bounds.bottom()),
         )
+
+    def _grab_at(self, view_position: QPointF) -> BoxGrab | None:
+        item_positions: range = range(len(self._reference_items) - 1, -1, -1)
+        for item_position in item_positions:
+            corners: tuple[QPointF, QPointF, QPointF, QPointF] = self._reference_items[item_position].corners
+            for corner_index, corner in enumerate(corners):
+                handle_offset: QPointF = QPointF(self.mapFromScene(corner)) - view_position
+                if handle_offset.manhattanLength() <= self.HANDLE_GRAB_DISTANCE:
+                    return BoxGrab(
+                        item_position=item_position,
+                        kind=BoxGrabKind.RESIZE,
+                        anchor=corners[(corner_index + 2) % len(corners)],
+                        original_rectangle=self._reference_items[item_position].rect(),
+                    )
+        scene_position: QPointF = self.mapToScene(view_position.toPoint())
+        for item_position in item_positions:
+            rectangle: QRectF = self._reference_items[item_position].rect()
+            if rectangle.contains(scene_position):
+                return BoxGrab(
+                    item_position=item_position,
+                    kind=BoxGrabKind.MOVE,
+                    anchor=scene_position,
+                    original_rectangle=rectangle,
+                )
+        return None
+
+    def _dragged_rectangle(self, grab: BoxGrab, event: QMouseEvent) -> QRectF:
+        match grab.kind:
+            case BoxGrabKind.RESIZE:
+                return QRectF(grab.anchor, self._clamped_scene_position(event)).normalized()
+            case BoxGrabKind.MOVE:
+                offset: QPointF = self.mapToScene(event.position().toPoint()) - grab.anchor
+                moved: QRectF = grab.original_rectangle.translated(offset)
+                bounds: QRectF = self._scene.sceneRect()
+                moved.moveLeft(min(max(moved.left(), bounds.left()), bounds.right() - moved.width()))
+                moved.moveTop(min(max(moved.top(), bounds.top()), bounds.bottom() - moved.height()))
+                return moved
+
+    def _release_grab(self, grab: BoxGrab, event: QMouseEvent) -> None:
+        self._grab = None
+        rectangle: QRectF = self._dragged_rectangle(grab, event)
+        if min(rectangle.width(), rectangle.height()) < self.MINIMUM_RECTANGLE_SIZE:
+            self._reference_items[grab.item_position].set_rectangle(grab.original_rectangle)
+            return
+        if rectangle != grab.original_rectangle:
+            self.reference_adjusted.emit(self._reference_box_indices[grab.item_position], rectangle)
+
+    @staticmethod
+    def _cursor_for(grab: BoxGrab | None) -> Qt.CursorShape:
+        if grab is None:
+            return Qt.CursorShape.CrossCursor
+        match grab.kind:
+            case BoxGrabKind.MOVE:
+                return Qt.CursorShape.SizeAllCursor
+            case BoxGrabKind.RESIZE:
+                grabbed_corner: QPointF = grab.original_rectangle.center() * 2.0 - grab.anchor
+                is_main_diagonal: bool = (grabbed_corner.x() - grab.anchor.x()) * (
+                    grabbed_corner.y() - grab.anchor.y()
+                ) > 0.0
+                return Qt.CursorShape.SizeFDiagCursor if is_main_diagonal else Qt.CursorShape.SizeBDiagCursor
 
     def _discard_rubber_band(self) -> None:
         if self._rubber_band is not None:

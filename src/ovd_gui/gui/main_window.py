@@ -44,13 +44,13 @@ from .export_dialog import ExportDialog
 from .intake import DropOverlay, DropZone
 from .prompt import ClassEditor
 from .sidebar import CollapsibleSection, ImageListPanel, SectionStack, SettingsPanel
-from .table import ResultPanel, ResultScope
+from .table import ResultPanel
 from .viewer import ImageCanvas
 
 
 class MainWindow(QMainWindow):
     """
-    Main window: class editor, model settings and image list on the left, image with detections in the center,
+    Main window: model settings, class editor and image list on the left, image with detections in the center,
     detection table on the right.
 
     The latest result of every detected image is kept, so switching images shows its boxes again without detecting,
@@ -148,6 +148,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(collection.describe("No new images found"))
             return
         self._center_stack.setCurrentWidget(self._canvas)
+        self._result_panel.add_images(collection.image_paths)
         self._image_list.add_images(collection.image_paths)
         self._images_section.set_title(self._image_list.title)
         added_count: int = len(collection.image_paths)
@@ -188,8 +189,8 @@ class MainWindow(QMainWindow):
         return [Path(url.toLocalFile()) for url in mime_data.urls() if url.isLocalFile()]
 
     def _build_layout(self) -> CollapsibleSection:
-        self._sidebar.add_section("Classes", self._class_editor, is_stretched=True)
         self._sidebar.add_section("Model", self._settings_panel, is_stretched=False)
+        self._sidebar.add_section("Classes", self._class_editor, is_stretched=True)
         images_section: CollapsibleSection = self._sidebar.add_section(
             self._image_list.title, self._image_list, is_stretched=True
         )
@@ -245,9 +246,9 @@ class MainWindow(QMainWindow):
         self._image_list.current_image_changed.connect(self._on_image_selected)
         self._detect_button.clicked.connect(self._request_detection)
         self._detect_all_button.clicked.connect(self._detect_all)
-        self._class_editor.detection_requested.connect(self._request_detection)
         self._class_editor.message_posted.connect(self._show_notice)
         self._result_panel.detection_selected.connect(self._on_detection_selected)
+        self._result_panel.image_selected.connect(self._on_result_image_selected)
         self._result_panel.selection_cleared.connect(self._on_detection_selection_cleared)
         self._result_panel.clear_requested.connect(self._clear_results)
         self._drop_zone.open_images_requested.connect(self._choose_images)
@@ -306,7 +307,6 @@ class MainWindow(QMainWindow):
         if missing_image_notice is not None:
             self.statusBar().showMessage(missing_image_notice)
             return False
-        self._class_editor.commit_pending_text()
         if not self._class_editor.classes:
             self.statusBar().showMessage("Add at least one class to detect.")
             return False
@@ -355,7 +355,7 @@ class MainWindow(QMainWindow):
 
     def _clear_results(self) -> None:
         self._detection_catalog.clear()
-        self._result_panel.clear()
+        self._result_panel.clear_results()
         self._canvas.clear_detections()
         self._summary_label.clear()
 
@@ -365,7 +365,6 @@ class MainWindow(QMainWindow):
         request: BatchDetectionRequest | None = self._build_batch_request()
         if request is None:
             return
-        self._result_panel.set_scope(ResultScope.ALL_IMAGES)
         self._runner.detect_batch(BatchJob.detect_all(request))
 
     def _export_detections(self) -> None:
@@ -454,6 +453,10 @@ class MainWindow(QMainWindow):
             return
         if self._current_image is not None and self._current_image.path == record.image_path:
             self._canvas.highlight(record.detection_index)
+
+    def _on_result_image_selected(self, image_path: Path) -> None:
+        self._image_list.select(image_path)
+        self._canvas.highlight(None)
 
     def _on_detection_selection_cleared(self) -> None:
         self._canvas.highlight(None)

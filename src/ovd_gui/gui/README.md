@@ -2,7 +2,7 @@
 
 ## Overview
 
-PySide6 widgets of the application. `MainWindow` composes the sidebar (classes, model, images), the image viewer and
+PySide6 widgets of the application. `MainWindow` composes the sidebar (model, classes, images), the image viewer and
 the detection table, and reacts to the outcomes reported by `DetectionRunner`, which runs inference on a separate
 `QThread`. Only `MainWindow` is exported; the sub-packages are imported by their own path.
 

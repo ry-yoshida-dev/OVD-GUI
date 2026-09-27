@@ -54,13 +54,14 @@ python -m ovd_gui
 | Action | How |
 | ------ | --- |
 | Open images | Drop files or folders anywhere on the window, `Open Images...` / `Open Folder...`, or command-line arguments |
-| Edit classes | Type `cat, dog` or `car: car, suv, taxi` below the class tree and press Enter; double-click a class or phrase to edit it; Delete removes the selected classes, phrases or reference images |
-| Add phrases | Select a class and press `Add Phrases...`, or type `car: van` to extend an existing class |
-| Save / load classes | `Save...` below the class tree asks only for a set name; `Load` lists the saved sets (or `From File...`) and replaces the current classes |
-| Add an image prompt | Select a class, press `Add Images...`, pick example images, then drag boxes around the examples or press `Use Whole Image`; each image appears under the class as one query |
-| Detect | `Detect`, Enter in the empty class field, or Ctrl+Enter |
-| Detect every image | `Detect All` or Ctrl+Shift+Enter (cancellable); the table switches to `All images` |
-| Find images showing a class | Choose `All images` and the class above the table; click a column header to sort, e.g. by `Confidence` |
+| Add a class or phrase | `+ Text` above the class tree adds a row next to the selection at the same level: a class after a selected class, a phrase after a selected phrase, a class at the end when nothing is selected (double-clicking the empty area also adds a class). Type the name and press Enter; Escape cancels. `suv, taxi` adds two phrases, and `car: car, suv` names the phrases of a new class |
+| Move a query | Drag a phrase onto another class or between its phrases to move it there; drop it between classes or below the rows to make it a class of its own. Reference images can be dragged to another class |
+| Edit or remove | Double-click a class or phrase to edit it; the trash button or Delete removes the selected classes, phrases or reference images; the same actions are in the right-click menu |
+| Save / load classes | `⋯` above the class tree: `Save Class Set...` asks only for a set name; `Load Class Set` lists the saved sets (or `From File...`) and replaces the current classes |
+| Add an image prompt | Select a class, press `+ Image`, drop example images or folders onto the window (or use `Open Images…` / `Open Folder…`), then drag boxes around the examples or press `Use Whole Image`; each image appears under the class as one query |
+| Detect | `Detect` or Ctrl+Enter |
+| Detect every image | `Detect All` or Ctrl+Shift+Enter (cancellable); every image fills in the table as it is detected |
+| Find images showing a class | Check the classes in the funnel menu above the table; click a column header to sort, e.g. by `Confidence` |
 | Jump to a detection | Select its row; its image opens and the box is highlighted |
 | Forget results | `Clear Results` below the table |
 | Fold panels | Click a sidebar section header |

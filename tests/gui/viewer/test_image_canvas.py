@@ -1,9 +1,12 @@
+from pathlib import Path
+
 import pytest
 from PIL import Image
 from PySide6.QtCore import QPoint, QRectF, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
+from ovd_gui.detection import ReferenceBox
 from ovd_gui.gui.class_palette import ClassPalette
 from ovd_gui.gui.viewer import ImageCanvas
 
@@ -43,3 +46,47 @@ def test_dragging_without_drawing_mode_emits_nothing(canvas: ImageCanvas) -> Non
     canvas.rectangle_drawn.connect(rectangles.append)
     _drag(canvas, canvas.mapFromScene(20.0, 10.0), canvas.mapFromScene(120.0, 80.0))
     assert rectangles == []
+
+
+def _show_editable_box(canvas: ImageCanvas) -> list[tuple[int, QRectF]]:
+    adjustments: list[tuple[int, QRectF]] = []
+    canvas.reference_adjusted.connect(lambda index, rectangle: adjustments.append((index, rectangle)))
+    canvas.set_drawing_enabled(True)
+    canvas.show_references(
+        [ReferenceBox(image_path=Path("a.png"), class_name="dog", left=40.0, top=20.0, right=80.0, bottom=60.0)],
+        ("dog",),
+    )
+    return adjustments
+
+
+def test_dragging_a_corner_handle_resizes_the_box(canvas: ImageCanvas) -> None:
+    adjustments: list[tuple[int, QRectF]] = _show_editable_box(canvas)
+    rectangles: list[QRectF] = []
+    canvas.rectangle_drawn.connect(rectangles.append)
+    _drag(canvas, canvas.mapFromScene(80.0, 60.0), canvas.mapFromScene(120.0, 90.0))
+    assert rectangles == []
+    assert len(adjustments) == 1
+    index, rectangle = adjustments[0]
+    assert index == 0
+    assert (rectangle.left(), rectangle.top()) == (40.0, 20.0)
+    assert rectangle.right() == pytest.approx(120.0, abs=1.0)
+    assert rectangle.bottom() == pytest.approx(90.0, abs=1.0)
+
+
+def test_dragging_inside_the_box_moves_it_within_the_image(canvas: ImageCanvas) -> None:
+    adjustments: list[tuple[int, QRectF]] = _show_editable_box(canvas)
+    _drag(canvas, canvas.mapFromScene(60.0, 40.0), canvas.mapFromScene(190.0, 45.0))
+    assert len(adjustments) == 1
+    rectangle: QRectF = adjustments[0][1]
+    assert rectangle.right() == pytest.approx(200.0)
+    assert rectangle.width() == pytest.approx(40.0)
+    assert rectangle.top() == pytest.approx(25.0, abs=1.0)
+
+
+def test_dragging_outside_the_box_draws_a_new_one(canvas: ImageCanvas) -> None:
+    adjustments: list[tuple[int, QRectF]] = _show_editable_box(canvas)
+    rectangles: list[QRectF] = []
+    canvas.rectangle_drawn.connect(rectangles.append)
+    _drag(canvas, canvas.mapFromScene(120.0, 20.0), canvas.mapFromScene(180.0, 80.0))
+    assert adjustments == []
+    assert len(rectangles) == 1

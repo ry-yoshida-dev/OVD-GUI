@@ -70,13 +70,22 @@ def test_filter_combines_image_class_name_and_confidence() -> None:
         ]
 
     assert len(accepted(DetectionFilter())) == 4
-    assert accepted(DetectionFilter(class_name="cat")) == [("Cat_01.jpg", 0), ("street.jpg", 0), ("street.jpg", 1)]
-    assert accepted(DetectionFilter(class_name="cat", minimum_confidence=0.5)) == [
+    assert accepted(DetectionFilter(class_names=frozenset({"cat"}))) == [
+        ("Cat_01.jpg", 0),
+        ("street.jpg", 0),
+        ("street.jpg", 1),
+    ]
+    assert accepted(DetectionFilter(class_names=frozenset({"cat"}), minimum_confidence=0.5)) == [
         ("Cat_01.jpg", 0),
         ("street.jpg", 0),
     ]
+    assert len(accepted(DetectionFilter(class_names=frozenset({"cat", "dog"})))) == 4
     assert accepted(DetectionFilter(image_name_text=" cat ")) == [("Cat_01.jpg", 0), ("Cat_01.jpg", 1)]
-    assert accepted(DetectionFilter(image_path=Path("/photos/street.jpg"), class_name="dog")) == []
+    assert DetectionFilter(image_name_text="street").accepts_image_without_detections(Path("/photos/street.jpg"))
+    assert not DetectionFilter(image_name_text="cat").accepts_image_without_detections(Path("/photos/street.jpg"))
+    assert not DetectionFilter(class_names=frozenset({"cat"})).accepts_image_without_detections(
+        Path("/photos/street.jpg")
+    )
 
 
 def test_filter_rejects_confidence_outside_unit_range() -> None:

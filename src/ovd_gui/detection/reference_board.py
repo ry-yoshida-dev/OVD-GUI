@@ -124,6 +124,26 @@ class ReferenceBoard:
         ]
         self._forget_unused_images()
 
+    def move_reference_image(self, class_name: str, image_path: Path, target_class_name: str) -> None:
+        """
+        Move the boxes of one class on one reference image to another class.
+
+        The moved image joins the reference images of the target class, merging with its boxes on the same image.
+
+        Parameters
+        ----------
+        class_name : str
+            Class the boxes belong to.
+        image_path : Path
+            Reference image of the boxes.
+        target_class_name : str
+            Class to move the boxes to.
+        """
+        self._boxes = [
+            box.renamed(target_class_name) if box.class_name == class_name and box.image_path == image_path else box
+            for box in self._boxes
+        ]
+
     def clear(self) -> None:
         """
         Remove every box.

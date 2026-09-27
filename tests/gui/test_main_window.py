@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QTableView
 
 from ovd_gui.gui import MainWindow
-from ovd_gui.gui.table import ResultColumn, ResultPanel, ResultScope
+from ovd_gui.gui.table import AnalysisState, ImageStatusRow, ResultColumn, ResultPanel
 from ovd_gui.preset import PresetCatalog
 from ovd_gui.vocabulary import ClassDefinition, ClassListStore
 
@@ -64,16 +64,27 @@ def _child[WidgetType: ResultPanel | QTableView](window: MainWindow, widget_type
     return widget
 
 
+def test_opened_images_are_listed_as_not_analyzed(window: MainWindow) -> None:
+    panel: ResultPanel = _child(window, ResultPanel)
+    assert [(row.image_path.name, row.state) for row in panel.visible_rows if isinstance(row, ImageStatusRow)] == [
+        (f"image{index}.png", AnalysisState.NOT_ANALYZED) for index in range(3)
+    ]
+    assert [row.image_path.name for row in panel.visible_rows if panel.is_current(row)] == ["image0.png"]
+    table_view: QTableView = _child(window, QTableView)
+    table_view.selectRow(2)
+    assert window._current_image is not None
+    assert window._current_image.path.name == "image2.png"
+
+
 def test_detect_all_lists_every_image_and_opens_the_image_of_a_selected_row(
     application: QApplication, window: MainWindow
 ) -> None:
     window._detect_all()
     _wait_until_idle(application, window)
     panel: ResultPanel = _child(window, ResultPanel)
-    assert panel.scope == ResultScope.ALL_IMAGES
     assert len(panel.visible_records) == 6
 
-    panel.set_class_filter("dog")
+    panel.set_class_filter({"dog"})
     assert [(record.image_path.name, record.detection_index) for record in panel.visible_records] == [
         ("image1.png", 1),
         ("image2.png", 1),
@@ -94,6 +105,7 @@ def test_stored_results_are_shown_again_and_can_be_cleared(application: QApplica
     assert len(window._canvas._box_items) == 2
     window._clear_results()
     assert _child(window, ResultPanel).visible_records == ()
+    assert len(_child(window, ResultPanel).visible_rows) == 3
     window._image_list.setCurrentRow(2)
     assert window._canvas._box_items == []
 

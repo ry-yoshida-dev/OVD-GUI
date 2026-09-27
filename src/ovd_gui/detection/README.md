@@ -22,5 +22,5 @@ reports the phrase or reference image that matched it.
 | [labeled_prompt.py](./labeled_prompt.py) | `LabeledPrompt`: `Prompt` with a display label per query (phrase or reference image name). |
 | [detection_outcome.py](./detection_outcome.py) | `DetectionOutcome`: result, inference time and whether the model was reloaded. |
 | [detection_catalog.py](./detection_catalog.py) | `DetectionCatalog`: latest result and query labels per image, listed as individual detections for searching across images. |
-| [detection_filter.py](./detection_filter.py) | `DetectionFilter`: image, class, file-name and confidence conditions for listing detections. |
+| [detection_filter.py](./detection_filter.py) | `DetectionFilter`: class, file-name and confidence conditions for listing detections and images without detections. |
 | [detection_record.py](./detection_record.py) | `DetectionRecord`: one detection with its image path, index in that image's result and matched query label. |

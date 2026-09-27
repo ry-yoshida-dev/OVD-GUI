@@ -22,7 +22,7 @@ ovd_gui_data/
 | Component | Description |
 | --------- | ----------- |
 | [class_definition.py](./class_definition.py) | `ClassDefinition`: class name and phrases, parsed from and written as `name: phrase, phrase`. |
-| [class_vocabulary.py](./class_vocabulary.py) | `ClassVocabulary`: ordered classes with unique names and phrases, edited by class id. |
+| [class_vocabulary.py](./class_vocabulary.py) | `ClassVocabulary`: ordered classes with unique names and phrases, edited by class id: insert, rename, move a phrase to another class or promote it to a class, remove. |
 | [class_list_file.py](./class_list_file.py) | `ClassListFile`: reads and writes a one-class-per-line text file. |
 | [class_list_store.py](./class_list_store.py) | `ClassListStore`: data directory remembering the last class list and holding named class sets. |
 

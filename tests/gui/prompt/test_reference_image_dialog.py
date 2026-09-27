@@ -45,3 +45,10 @@ def test_a_new_image_starts_without_boxes(dialog: ReferenceImageDialog) -> None:
     other_image: LoadedImage = LoadedImage(path=Path("other.png"), image=Image.new("RGB", (50, 50)))
     dialog.set_reference_image(other_image, "cat", ("cat", "dog"))
     assert [box.xyxy for box in dialog.boxes] == [(0.0, 0.0, 50.0, 50.0)]
+
+
+def test_adjusted_box_replaces_the_drawn_one(dialog: ReferenceImageDialog) -> None:
+    canvas: ImageCanvas = _canvas_of(dialog)
+    canvas.rectangle_drawn.emit(QRectF(10.0, 20.0, 30.0, 40.0))
+    canvas.reference_adjusted.emit(0, QRectF(15.0, 25.0, 30.0, 40.0))
+    assert [box.xyxy for box in dialog.boxes] == [(15.0, 25.0, 45.0, 65.0)]

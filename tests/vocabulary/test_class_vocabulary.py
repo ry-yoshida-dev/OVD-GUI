@@ -51,3 +51,29 @@ def test_remove_classes_and_phrases() -> None:
     vocabulary.remove_phrases(1, [0])
     vocabulary.remove_classes([0, 5])
     assert [definition.text for definition in vocabulary.classes] == ["dog: puppy", "bird"]
+
+
+def test_insert_places_classes_and_phrases_at_a_position() -> None:
+    vocabulary: ClassVocabulary = _vocabulary("cat", "dog: dog, puppy")
+    vocabulary.insert(1, ClassDefinition.named("bird"))
+    vocabulary.insert_phrases(2, 1, ["hound", "Dog"])
+    assert [definition.text for definition in vocabulary.classes] == ["cat", "bird", "dog: dog, hound, puppy"]
+    with pytest.raises(ValueError, match="already exists"):
+        vocabulary.insert(0, ClassDefinition.named("BIRD"))
+
+
+def test_move_phrase_within_and_across_classes() -> None:
+    vocabulary: ClassVocabulary = _vocabulary("car: car, suv, van", "truck")
+    vocabulary.move_phrase(0, 0, 0, 3)
+    assert vocabulary.classes[0].text_queries == ("suv", "van", "car")
+    vocabulary.move_phrase(0, 1, 1, 0)
+    assert [definition.text for definition in vocabulary.classes] == ["car: suv, car", "truck: van, truck"]
+
+
+def test_promote_phrase_makes_a_class_of_it() -> None:
+    vocabulary: ClassVocabulary = _vocabulary("car: car, van", "truck")
+    assert vocabulary.promote_phrase(0, 1, 1) == 1
+    assert [definition.text for definition in vocabulary.classes] == ["car", "van", "truck"]
+    with pytest.raises(ValueError, match="already exists"):
+        vocabulary.promote_phrase(2, 0, 0)
+    assert [definition.text for definition in vocabulary.classes] == ["car", "van", "truck"]
