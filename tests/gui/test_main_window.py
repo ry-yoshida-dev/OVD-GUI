@@ -17,7 +17,7 @@ from PIL import Image
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QMessageBox, QTableView
 
-from ovd_gui.detection import DeviceAvailability, ReferenceBox, ReferenceImage
+from ovd_gui.detection import DetectionOutcome, DeviceAvailability, ReferenceBox, ReferenceImage
 from ovd_gui.gui import MainWindow
 from ovd_gui.gui.execution import BatchJob
 from ovd_gui.gui.table import AnalysisState, ImageStatusRow, ProfilePanel, ResultColumn, ResultPanel, ValueCondition
@@ -30,10 +30,13 @@ _REFERENCE_IMAGE: ReferenceImage = ReferenceImage.of("a.jpg", Image.new("RGB", (
 
 class WidthCountingDetector(OpenVocabularyDetector):
     BACKEND: ClassVar[DetectorBackend] = DetectorBackend.GROUNDING_DINO
+    failing_widths: frozenset[int] = frozenset()
 
     def _detect_mini_batch(self, images: Sequence[Image.Image], prompt: Prompt) -> list[DetectionResult]:
         results: list[DetectionResult] = []
         for image in images:
+            if image.width in self.failing_widths:
+                raise ValueError("unsupported image")
             count: int = image.width // 32
             results.append(
                 DetectionResult.from_xyxy(
@@ -187,26 +190,59 @@ def _detected_image_names(window: MainWindow) -> set[str]:
     return {record.image_path.name for record in _child(window, ResultPanel).visible_records}
 
 
-def test_shown_image_is_detected_in_the_background_without_blocking_the_window(
+def _record_background_order(window: MainWindow) -> list[str]:
+    detected_order: list[str] = []
+
+    def record_order(outcome: DetectionOutcome) -> None:
+        detected_order.append(outcome.request.image_path.name)
+
+    window._runner.background_succeeded.connect(record_order)
+    return detected_order
+
+
+def test_every_open_image_is_detected_in_the_background_without_blocking_the_window(
     application: QApplication, window: MainWindow
 ) -> None:
+    detected_order: list[str] = _record_background_order(window)
     assert not window._runner.is_idle
     assert not window._runner.is_busy
     assert window._detect_button.isEnabled()
     assert window._settings_panel.isEnabled()
     _wait_until_idle(application, window)
-    assert _detected_image_names(window) == {"image0.png"}
+    assert detected_order == ["image0.png", "image1.png", "image2.png"]
     assert len(window._canvas._box_items) == 1
 
 
-def test_only_the_latest_shown_image_waits_for_background_detection(
-    application: QApplication, window: MainWindow
-) -> None:
+def test_newly_shown_image_is_detected_before_the_other_images(application: QApplication, window: MainWindow) -> None:
+    detected_order: list[str] = _record_background_order(window)
     window._image_list.setCurrentRow(1)
     window._image_list.setCurrentRow(2)
     _wait_until_idle(application, window)
-    assert _detected_image_names(window) == {"image0.png", "image2.png"}
+    assert detected_order == ["image0.png", "image2.png", "image1.png"]
     assert len(window._canvas._box_items) == 3
+
+
+def test_unreadable_images_are_skipped_by_background_detection(application: QApplication, window: MainWindow) -> None:
+    detected_order: list[str] = _record_background_order(window)
+    window._image_list.image_paths[1].write_bytes(b"not an image")
+    _wait_until_idle(application, window)
+    assert detected_order == ["image0.png", "image2.png"]
+
+
+def test_failed_background_detection_pauses_the_other_images_and_is_not_retried(
+    application: QApplication, window: MainWindow
+) -> None:
+    detected_order: list[str] = _record_background_order(window)
+    detector: OpenVocabularyDetector | None = window._runner._worker._session._detector
+    assert isinstance(detector, WidthCountingDetector)
+    detector.failing_widths = frozenset({64})
+    _wait_until_idle(application, window)
+    assert detected_order == ["image0.png"]
+    assert "image1.png failed" in window.statusBar().currentMessage()
+
+    window._image_list.setCurrentRow(2)
+    _wait_until_idle(application, window)
+    assert detected_order == ["image0.png", "image2.png"]
 
 
 def test_detect_all_starts_after_the_background_detection_and_detects_the_shown_image_first(
@@ -238,11 +274,8 @@ def test_results_of_each_model_are_kept_and_shown_again_without_detecting(
     window._request_detection()
     _wait_until_idle(application, window)
     panel: ResultPanel = _child(window, ResultPanel)
-    assert len(panel.visible_records) == 3
-    assert [row.image_path.name for row in panel.visible_rows if isinstance(row, ImageStatusRow)] == [
-        "image0.png",
-        "image1.png",
-    ]
+    assert len(panel.visible_records) == 6
+    assert [row for row in panel.visible_rows if isinstance(row, ImageStatusRow)] == []
 
     profile_panel: ProfilePanel = _child(window, ProfilePanel)
     first_profile, second_profile = profile_panel.profiles
@@ -255,4 +288,26 @@ def test_results_of_each_model_are_kept_and_shown_again_without_detecting(
     window._remove_profile(first_profile)
     assert profile_panel.profiles == (second_profile,)
     assert profile_panel.selected_profile == second_profile
-    assert len(panel.visible_records) == 3
+    assert len(panel.visible_records) == 6
+
+
+def test_editing_classes_keeps_results_but_marks_them_outdated_until_updated(
+    application: QApplication, window: MainWindow
+) -> None:
+    window._detect_all()
+    _wait_until_idle(application, window)
+    panel: ResultPanel = _child(window, ResultPanel)
+    profile_panel: ProfilePanel = _child(window, ProfilePanel)
+    assert panel.outdated_image_paths == ()
+
+    window._class_editor.set_classes((ClassDefinition.named("cat"), ClassDefinition.parse("dog: dog, puppy")))
+    assert len(panel.visible_records) == 6
+    assert panel.outdated_image_paths == window._image_list.image_paths
+    assert window._result_library.summaries(window._current_signature())[0].outdated_image_count == 3
+    assert profile_panel.profiles == window._result_library.profiles
+
+    window._update_outdated()
+    assert window._runner.is_busy
+    _wait_until_idle(application, window)
+    assert panel.outdated_image_paths == ()
+    assert window._result_library.summaries(window._current_signature())[0].outdated_image_count == 0

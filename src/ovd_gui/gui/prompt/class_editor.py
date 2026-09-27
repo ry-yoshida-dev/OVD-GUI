@@ -23,6 +23,7 @@ from ...vocabulary import ClassDefinition, ClassListFile, ClassListStore, ClassV
 from ..class_palette import ClassPalette
 from .class_set_dialog import ClassSetDialog
 from .class_tree import ClassTree
+from .more_icon import MoreIcon
 from .reference_image_importer import ReferenceImageImporter
 from .trash_icon import TrashIcon
 
@@ -40,10 +41,12 @@ class ClassEditor(QWidget):
 
     The ``Set`` drop-down above the toolbar lists the class sets saved in the data directory, like the preset
     drop-down of the model settings: choosing one loads it, after confirming when the current classes were edited,
-    and ``Edited`` marks changes since the set was loaded or saved. The ``⋯`` menu holds the class sets: ``Class Sets...`` opens the ``ClassSetDialog`` library to preview, load,
-    rename, delete, import or export saved sets; ``Save Class Set...`` asks only for a name and stores the classes,
-    their phrases and their reference images (pixels included) as one archive in the data directory; ``Load From
-    File...`` takes a class set archive or any class list text file; ``Clear`` removes every class. The classes and
+    and ``Edited`` marks changes since the set was loaded or saved. ``Save…`` next to it asks only for a name and
+    stores the classes, their phrases and their reference images (pixels included) as one archive in the data
+    directory. The three-dot menu holds ``Class Sets…``, which opens the ``ClassSetDialog`` library to preview,
+    load, rename, delete, import or export saved sets, ``Open File…``, which takes a class set archive or any class
+    list text file, and ``Clear All Classes…``, which removes every class after confirmation. Every load asks first
+    when it would discard classes that are not saved as they are. The classes and
     phrases are also remembered in the data directory after every change, to be restored at the next start;
     reference images come back only through a class set.
 
@@ -124,7 +127,7 @@ class ClassEditor(QWidget):
             self._tree.start_new_phrase_after_selection,
         )
         self._add_images_action: QAction = self._create_action(
-            "Add Reference Images...", "+ Image", "", self._import_reference_images
+            "Add Reference Images…", "+ Image", "", self._import_reference_images
         )
         self._remove_action: QAction = self._create_action(
             "Remove",
@@ -133,37 +136,37 @@ class ClassEditor(QWidget):
             self._tree.remove_selected_rows,
         )
         self._save_action: QAction = self._create_action(
-            "Save Class Set...",
-            "Save...",
+            "Save Class Set…",
+            "Save…",
             "Save the classes with their text prompts and reference images as a named class set.",
             self._ask_name_and_save,
         )
         self._clear_action: QAction = self._create_action(
-            "Clear All Classes", "Clear", "Remove every class.", self.clear
+            "Clear All Classes…", "Clear", "Remove every class after confirmation.", self._confirm_and_clear
         )
 
         self._library_action: QAction = self._create_action(
-            "Class Sets...",
-            "Class Sets...",
+            "Class Sets…",
+            "Class Sets…",
             "Browse, load, rename, delete, import or export the saved class sets.",
             self._open_class_set_library,
         )
         self._load_file_action: QAction = self._create_action(
-            "Load From File...",
-            "Load From File...",
-            "Replace the classes with a class set archive or a class list text file.",
+            "Open File…",
+            "Open File…",
+            "Replace the classes with a class set archive or a class list text file from elsewhere.",
             self._choose_file_to_load,
         )
         more_menu: QMenu = QMenu(self)
         more_menu.setToolTipsVisible(True)
         more_menu.addAction(self._library_action)
-        more_menu.addAction(self._save_action)
         more_menu.addAction(self._load_file_action)
         more_menu.addSeparator()
         more_menu.addAction(self._clear_action)
         more_button: QToolButton = QToolButton()
-        more_button.setText("\u22ef")
-        more_button.setToolTip("Class sets: browse, save and load; clear the classes.")
+        more_button.setIcon(MoreIcon(self.palette().color(QPalette.ColorRole.ButtonText)).to_icon())
+        more_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        more_button.setToolTip("Manage the saved class sets, open a class file or clear the classes.")
         more_button.setAutoRaise(True)
         more_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         more_button.setMenu(more_menu)
@@ -412,6 +415,38 @@ class ClassEditor(QWidget):
         """
         self.set_classes(())
 
+    def _confirm_discard(self, title: str, action_description: str) -> bool:
+        is_unsaved: bool = bool(self.classes) and (self._is_edited or not self._class_set_name)
+        if not is_unsaved:
+            return True
+        unsaved_description: str = (
+            f"the unsaved edits to '{self._class_set_name}'" if self._class_set_name else "the current unsaved classes"
+        )
+        return (
+            QMessageBox.question(
+                self,
+                title,
+                f"{action_description} and discard {unsaved_description}?",
+                QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            == QMessageBox.StandardButton.Discard
+        )
+
+    def _confirm_and_clear(self) -> None:
+        if (
+            QMessageBox.question(
+                self,
+                "Clear All Classes",
+                f"Remove all {len(self._vocabulary)} classes with their prompts and reference images?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        self.clear()
+
     def _associate(self, name: str) -> None:
         self._class_set_name = name
         self._is_edited = False
@@ -424,16 +459,7 @@ class ClassEditor(QWidget):
         name: str = self._set_combo.itemText(index)
         if name == self._class_set_name and not self._is_edited:
             return
-        if (
-            self._is_edited
-            and self.classes
-            and QMessageBox.question(
-                self,
-                "Load Class Set",
-                f"Load the class set '{name}' and discard the edits to the current classes?",
-            )
-            != QMessageBox.StandardButton.Yes
-        ):
+        if not self._confirm_discard("Load Class Set", f"Load the class set '{name}'"):
             self.refresh_class_sets()
             return
         self._load_class_set_interactively(name)
@@ -517,7 +543,7 @@ class ClassEditor(QWidget):
         name: str | None = self._class_set_dialog.ask(self._class_set_name)
         self._class_set_name = self._class_set_dialog.name_after_renames(self._class_set_name)
         self.refresh_class_sets()
-        if name is not None:
+        if name is not None and self._confirm_discard("Load Class Set", f"Load the class set '{name}'"):
             self._load_class_set_interactively(name)
 
     def _load_class_set_interactively(self, name: str) -> None:
@@ -534,6 +560,8 @@ class ClassEditor(QWidget):
             return
         path: Path = Path(file_name)
         self._last_directory = path.parent
+        if not self._confirm_discard("Open Class File", f"Open {path.name}"):
+            return
         try:
             self.load_file(path)
         except (OSError, ValueError) as error:

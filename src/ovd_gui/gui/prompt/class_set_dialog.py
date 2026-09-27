@@ -103,11 +103,11 @@ class ClassSetDialog(QDialog):
 
         self._rename_action: QAction = self._create_action("Rename", self._rename_current, QKeySequence(Qt.Key.Key_F2))
         self._delete_action: QAction = self._create_action(
-            "Delete...", self._delete_current, QKeySequence(QKeySequence.StandardKey.Delete)
+            "Delete…", self._delete_current, QKeySequence(QKeySequence.StandardKey.Delete)
         )
         self._delete_action.setIcon(TrashIcon(self.palette().color(QPalette.ColorRole.ButtonText)).to_icon())
-        self._export_action: QAction = self._create_action("Export...", self._export_current)
-        self._import_action: QAction = self._create_action("Import...", self._import_archive)
+        self._export_action: QAction = self._create_action("Export…", self._export_current)
+        self._import_action: QAction = self._create_action("Import…", self._import_archive)
         self._load_action: QAction = self._create_action("Load", self._load_current)
 
         list_footer: QHBoxLayout = QHBoxLayout()

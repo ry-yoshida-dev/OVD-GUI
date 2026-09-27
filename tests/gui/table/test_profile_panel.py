@@ -23,8 +23,8 @@ def panel(application: QApplication) -> ProfilePanel:
     profile_panel: ProfilePanel = ProfilePanel()
     profile_panel.set_summaries(
         (
-            ProfileSummary(profile=SMALL, image_count=3, detection_count=7),
-            ProfileSummary(profile=LARGE, image_count=1, detection_count=2),
+            ProfileSummary(profile=SMALL, image_count=3, outdated_image_count=0, detection_count=7),
+            ProfileSummary(profile=LARGE, image_count=1, outdated_image_count=0, detection_count=2),
         ),
         SMALL,
     )
@@ -45,6 +45,7 @@ def test_rows_show_model_options_and_counts_with_the_shown_profile_selected(pane
         "yolov8s-worldv2",
         "cpu · fp32 · conf 0.25 · NMS off",
         "3",
+        "",
         "7",
     ]
     assert panel.profiles == (SMALL, LARGE)
@@ -54,12 +55,14 @@ def test_rows_show_model_options_and_counts_with_the_shown_profile_selected(pane
 def test_selecting_a_row_reports_its_profile_but_listing_does_not(panel: ProfilePanel) -> None:
     selected: list[DetectorProfile] = []
     panel.profile_selected.connect(selected.append)
-    panel.set_summaries((ProfileSummary(profile=LARGE, image_count=1, detection_count=2),), LARGE)
+    panel.set_summaries(
+        (ProfileSummary(profile=LARGE, image_count=1, outdated_image_count=0, detection_count=2),), LARGE
+    )
     assert selected == []
     panel.set_summaries(
         (
-            ProfileSummary(profile=SMALL, image_count=3, detection_count=7),
-            ProfileSummary(profile=LARGE, image_count=1, detection_count=2),
+            ProfileSummary(profile=SMALL, image_count=3, outdated_image_count=0, detection_count=7),
+            ProfileSummary(profile=LARGE, image_count=1, outdated_image_count=0, detection_count=2),
         ),
         LARGE,
     )
@@ -82,4 +85,6 @@ def test_unlisted_profiles_are_rejected(panel: ProfilePanel) -> None:
     with pytest.raises(KeyError):
         panel.select_profile(replace(SMALL, device=Device.CUDA))
     with pytest.raises(KeyError):
-        panel.set_summaries((ProfileSummary(profile=SMALL, image_count=0, detection_count=0),), LARGE)
+        panel.set_summaries(
+            (ProfileSummary(profile=SMALL, image_count=0, outdated_image_count=0, detection_count=0),), LARGE
+        )

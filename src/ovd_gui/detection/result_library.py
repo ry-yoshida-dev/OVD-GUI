@@ -5,7 +5,10 @@ from open_vocabulary_detector import DetectionResult
 from .detection_catalog import DetectionCatalog
 from .detection_record import DetectionRecord
 from .detector_profile import DetectorProfile
+from .labeled_prompt import LabeledPrompt
 from .profile_summary import ProfileSummary
+from .prompt_change import PromptChange
+from .prompt_signature import PromptSignature
 
 
 class ResultLibrary:
@@ -13,7 +16,8 @@ class ResultLibrary:
     Latest result of every image, kept separately for every detector profile.
 
     Detecting with another model or other thresholds adds a profile instead of replacing earlier results, so the
-    results of several models can be compared without detecting again. Profiles keep the order in which they were
+    results of several models can be compared without detecting again. Editing the classes keeps every result; the
+    images detected with other classes are reported as outdated instead. Profiles keep the order in which they were
     added; results are kept in memory for the session only.
     """
 
@@ -52,7 +56,7 @@ class ResultLibrary:
         return self._catalogs.setdefault(profile, DetectionCatalog())
 
     def record(
-        self, profile: DetectorProfile, image_path: Path, result: DetectionResult, query_labels: tuple[str, ...]
+        self, profile: DetectorProfile, image_path: Path, result: DetectionResult, labeled_prompt: LabeledPrompt
     ) -> tuple[DetectionRecord, ...]:
         """
         Store the result of one image under its profile, replacing an earlier result of the same profile.
@@ -65,8 +69,8 @@ class ResultLibrary:
             Image file the result was detected in.
         result : DetectionResult
             Detections of the image.
-        query_labels : tuple[str, ...]
-            Label of each query of the prompt the result was detected with.
+        labeled_prompt : LabeledPrompt
+            Prompt the result was detected with.
 
         Returns
         -------
@@ -76,9 +80,9 @@ class ResultLibrary:
         Raises
         ------
         ValueError
-            If there is not exactly one label per prompt query.
+            If the prompt does not have as many queries as the prompt of the result.
         """
-        return self.add(profile).record(image_path, result, query_labels)
+        return self.add(profile).record(image_path, result, labeled_prompt)
 
     def catalog_of(self, profile: DetectorProfile) -> DetectionCatalog:
         """
@@ -103,9 +107,65 @@ class ResultLibrary:
             raise KeyError(f"no results stored for {profile.model_name} ({profile.options_text})")
         return self._catalogs[profile]
 
-    def summaries(self) -> tuple[ProfileSummary, ...]:
+    def outdated_images(self, profile: DetectorProfile, current: PromptSignature) -> dict[Path, PromptChange]:
         """
-        Image and detection counts of every profile.
+        Images of one profile detected with another prompt than the current one.
+
+        Parameters
+        ----------
+        profile : DetectorProfile
+            Stored profile.
+        current : PromptSignature
+            Phrases and reference boxes of the current classes, whatever the model; reference boxes are ignored for
+            a model without image prompts.
+
+        Returns
+        -------
+        dict[Path, PromptChange]
+            Change of every outdated image, in recording order.
+
+        Raises
+        ------
+        KeyError
+            If the profile is not stored.
+        """
+        return self.catalog_of(profile).outdated_images(
+            current.for_prompt_kinds(profile.backend.supported_prompt_kinds)
+        )
+
+    def prompt_change_of(
+        self, profile: DetectorProfile, image_path: Path, current: PromptSignature
+    ) -> PromptChange | None:
+        """
+        How the classes have changed since one image was detected with one profile.
+
+        Parameters
+        ----------
+        profile : DetectorProfile
+            Profile to look up.
+        image_path : Path
+            Image to look up.
+        current : PromptSignature
+            Phrases and reference boxes of the current classes, whatever the model.
+
+        Returns
+        -------
+        PromptChange | None
+            ``None`` if the image has not been detected with the profile.
+        """
+        catalog: DetectionCatalog | None = self._catalogs.get(profile)
+        if catalog is None:
+            return None
+        return catalog.prompt_change_of(image_path, current.for_prompt_kinds(profile.backend.supported_prompt_kinds))
+
+    def summaries(self, current: PromptSignature) -> tuple[ProfileSummary, ...]:
+        """
+        Image, outdated image and detection counts of every profile.
+
+        Parameters
+        ----------
+        current : PromptSignature
+            Phrases and reference boxes of the current classes, whatever the model.
 
         Returns
         -------
@@ -113,7 +173,12 @@ class ResultLibrary:
             One summary per profile, in the order the profiles were added.
         """
         return tuple(
-            ProfileSummary(profile=profile, image_count=len(catalog), detection_count=len(catalog.records()))
+            ProfileSummary(
+                profile=profile,
+                image_count=len(catalog),
+                outdated_image_count=len(self.outdated_images(profile, current)),
+                detection_count=len(catalog.records()),
+            )
             for profile, catalog in self._catalogs.items()
         )
 

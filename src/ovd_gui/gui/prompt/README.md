@@ -10,7 +10,7 @@ images together can be saved and loaded as named class sets.
 
 | Component | Description |
 | --------- | ----------- |
-| [class_editor.py](./class_editor.py) | `ClassEditor`: `Set` drop-down loading the saved class sets (with an `Edited` mark and a save button) above a class tree under an explorer-style toolbar (`+ Text` adding a class or prompt row next to the selection, `+ Image` opening a drop window for reference images, a trash button, `⋯` for the class set library, save, load from file and clear; class sets carry the reference images) and a context menu with explicit new class and new prompt actions; remembers the classes. |
+| [class_editor.py](./class_editor.py) | `ClassEditor`: `Set` drop-down loading the saved class sets (with an `Edited` mark and a `Save…` button; loads confirm before discarding unsaved classes) above a class tree under an explorer-style toolbar (`+ Text` adding a class or prompt row next to the selection, `+ Image` opening a drop window for reference images, a trash button, a three-dot menu for the class set library, opening a class file and a confirmed clear; class sets carry the reference images) and a context menu with explicit new class and new prompt actions; remembers the classes. |
 | [class_set_dialog.py](./class_set_dialog.py) | `ClassSetDialog`: library of saved class sets with search, preview, load, in-place rename (F2), confirmed delete (Delete), import and export; unreadable sets stay listed so they can be deleted. |
 | [class_set_row_delegate.py](./class_set_row_delegate.py) | `ClassSetRowDelegate`: two-line rounded list row with set name, save time and a muted content line. |
 | [class_set_preview.py](./class_set_preview.py) | `ClassSetPreview`: name, counts, classes with text prompts and image prompt thumbnails of one class set. |
@@ -22,4 +22,5 @@ images together can be saved and loaded as named class sets.
 | [reference_image_importer.py](./reference_image_importer.py) | `ReferenceImageImporter`: takes reference images from the source dialog and adds the boxes drawn on each to the reference board. |
 | [reference_source_dialog.py](./reference_source_dialog.py) | `ReferenceSourceDialog`: drop target for reference images and folders, with buttons opening the file and folder dialogs. |
 | [reference_image_dialog.py](./reference_image_dialog.py) | `ReferenceImageDialog`: boxes the examples of a class on a reference image, with drawn boxes movable and resizable, or uses the whole image. |
+| [more_icon.py](./more_icon.py) | `MoreIcon`: three-dot icon of the overflow menu button. |
 | [trash_icon.py](./trash_icon.py) | `TrashIcon`: trash can icon of the remove action. |

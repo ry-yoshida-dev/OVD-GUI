@@ -11,9 +11,11 @@ from open_vocabulary_detector import (
     Device,
     ImageSize,
     Prompt,
+    PromptKind,
 )
 
-from ovd_gui.detection import DetectorProfile, ProfileSummary, ResultLibrary
+from ovd_gui.detection import DetectorProfile, LabeledPrompt, ProfileSummary, ReferenceBoard, ResultLibrary
+from ovd_gui.vocabulary import ClassDefinition
 
 SETTINGS: DetectorSettings = DetectorSettings(
     backend=DetectorBackend.YOLO_WORLD,
@@ -21,6 +23,9 @@ SETTINGS: DetectorSettings = DetectorSettings(
     thresholds=DetectionThresholds(confidence_threshold=0.25, nms_iou_threshold=0.7),
     device=Device.CPU,
 )
+
+
+CAT_PROMPT: LabeledPrompt = ReferenceBoard().build_prompt((ClassDefinition.named("cat"),), frozenset({PromptKind.TEXT}))
 
 
 def _result(count: int) -> DetectionResult:
@@ -49,14 +54,14 @@ def test_results_of_each_profile_are_kept_apart() -> None:
     small: DetectorProfile = DetectorProfile.of(SETTINGS)
     large: DetectorProfile = DetectorProfile.of(replace(SETTINGS, weights_path="yolov8l-worldv2.pt"))
     library: ResultLibrary = ResultLibrary()
-    library.record(small, Path("a.jpg"), _result(1), ("cat",))
-    library.record(large, Path("a.jpg"), _result(3), ("cat",))
-    library.record(large, Path("b.jpg"), _result(0), ("cat",))
-    library.record(small, Path("a.jpg"), _result(2), ("cat",))
+    library.record(small, Path("a.jpg"), _result(1), CAT_PROMPT)
+    library.record(large, Path("a.jpg"), _result(3), CAT_PROMPT)
+    library.record(large, Path("b.jpg"), _result(0), CAT_PROMPT)
+    library.record(small, Path("a.jpg"), _result(2), CAT_PROMPT)
     assert library.profiles == (small, large)
-    assert library.summaries() == (
-        ProfileSummary(profile=small, image_count=1, detection_count=2),
-        ProfileSummary(profile=large, image_count=2, detection_count=3),
+    assert library.summaries(CAT_PROMPT.signature) == (
+        ProfileSummary(profile=small, image_count=1, outdated_image_count=0, detection_count=2),
+        ProfileSummary(profile=large, image_count=2, outdated_image_count=0, detection_count=3),
     )
     assert len(library.catalog_of(large).records_of(Path("a.jpg"))) == 3
 

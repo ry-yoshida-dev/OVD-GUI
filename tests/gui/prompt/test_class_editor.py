@@ -3,11 +3,13 @@ from pathlib import Path
 import pytest
 from PIL import Image
 from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QAction
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QComboBox,
+    QFileDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -425,11 +427,11 @@ def test_edits_are_marked_and_confirmed_before_switching_sets(
     editor.set_classes((ClassDefinition.named("car"), ClassDefinition.named("bus")))
     assert editor.is_edited
     assert not edited_label.isHidden()
-    monkeypatch.setattr(QMessageBox, "question", lambda *arguments: QMessageBox.StandardButton.No)
+    monkeypatch.setattr(QMessageBox, "question", lambda *arguments: QMessageBox.StandardButton.Cancel)
     combo.activated.emit(0)
     assert editor.class_names == ("car", "bus")
     assert combo.currentText() == "vehicles"
-    monkeypatch.setattr(QMessageBox, "question", lambda *arguments: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "question", lambda *arguments: QMessageBox.StandardButton.Discard)
     combo.activated.emit(0)
     assert editor.class_names == ("cat",)
 
@@ -442,3 +444,49 @@ def test_classes_from_a_file_are_not_tied_to_a_set(editor: ClassEditor, tmp_path
     editor.load_file(path)
     assert editor.class_set_name == ""
     assert _set_combo_of(editor).currentIndex() == -1
+
+
+def test_clear_all_classes_asks_for_confirmation(editor: ClassEditor, monkeypatch: pytest.MonkeyPatch) -> None:
+    editor.set_classes((ClassDefinition.named("car"), ClassDefinition.named("bus")))
+    clear_actions: list[QAction] = [
+        action for action in editor.findChildren(QAction) if action.text() == "Clear All Classes…"
+    ]
+    assert len(clear_actions) == 1
+    monkeypatch.setattr(QMessageBox, "question", lambda *arguments: QMessageBox.StandardButton.Cancel)
+    clear_actions[0].trigger()
+    assert editor.class_names == ("car", "bus")
+    monkeypatch.setattr(QMessageBox, "question", lambda *arguments: QMessageBox.StandardButton.Yes)
+    clear_actions[0].trigger()
+    assert not editor.classes
+
+
+def test_opening_a_file_asks_before_discarding_unsaved_classes(
+    editor: ClassEditor, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path: Path = tmp_path / "coco.names"
+    path.write_text("person\n", encoding="utf-8")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *arguments: (str(path), ""))
+    editor.set_classes((ClassDefinition.named("car"),))
+    open_actions: list[QAction] = [action for action in editor.findChildren(QAction) if action.text() == "Open File…"]
+    assert len(open_actions) == 1
+    monkeypatch.setattr(QMessageBox, "question", lambda *arguments: QMessageBox.StandardButton.Cancel)
+    open_actions[0].trigger()
+    assert editor.class_names == ("car",)
+    monkeypatch.setattr(QMessageBox, "question", lambda *arguments: QMessageBox.StandardButton.Discard)
+    open_actions[0].trigger()
+    assert editor.class_names == ("person",)
+
+
+def test_loading_a_saved_unedited_set_does_not_ask(editor: ClassEditor, monkeypatch: pytest.MonkeyPatch) -> None:
+    editor.set_classes((ClassDefinition.named("cat"),))
+    editor.save_class_set("pets")
+    editor.set_classes((ClassDefinition.named("car"),))
+    editor.save_class_set("vehicles")
+
+    def fail_on_question(*arguments: object) -> QMessageBox.StandardButton:
+        raise AssertionError("A saved and unedited class set must load without asking.")
+
+    monkeypatch.setattr(QMessageBox, "question", fail_on_question)
+    combo: QComboBox = _set_combo_of(editor)
+    combo.activated.emit(combo.findText("pets"))
+    assert editor.class_names == ("cat",)

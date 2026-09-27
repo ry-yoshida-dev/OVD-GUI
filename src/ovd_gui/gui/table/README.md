@@ -5,17 +5,18 @@
 Right side of the window: the model table listing every detector profile with stored results, and the detection
 table listing every open image with the detections of the selected profile, filtered, sorted, and selectable to jump
 to their image. Images without detections say whether they are not analyzed yet or have no detections, and
-the rows of the shown image are highlighted. Every column of the detection table is filtered from the funnel in its
+the rows of the shown image are highlighted. Images detected with other classes than the current ones are marked
+with a warning icon and counted in the model table; `Update Outdated` asks to detect them again. Every column of the detection table is filtered from the funnel in its
 header: text columns by checking values, numeric columns (confidence, box corners) by lower and upper bounds.
 
 ## Components
 
 | Component | Description |
 | --------- | ----------- |
-| [profile_panel.py](./profile_panel.py) | `ProfilePanel`: model table with options and counts per profile; selecting a row shows its results, Remove forgets them. |
+| [profile_panel.py](./profile_panel.py) | `ProfilePanel`: model table with options, image, outdated image and detection counts per profile; selecting a row shows its results, Remove forgets them. |
 | [profile_column.py](./profile_column.py) | `ProfileColumn`: columns of the model table. |
-| [result_panel.py](./result_panel.py) | `ResultPanel`: detection table with a filter per column and a Clear Filters button; selecting a row reports its detection or image. |
-| [result_row_model.py](./result_row_model.py) | `ResultRowModel`: rows per open image with image, class, matched query, confidence and box columns; highlights the current image. |
+| [result_panel.py](./result_panel.py) | `ResultPanel`: detection table with a filter per column, Clear Filters and Update Outdated buttons; selecting a row reports its detection or image, and new results or filters never move the selection to another image. |
+| [result_row_model.py](./result_row_model.py) | `ResultRowModel`: rows per open image with image, class, matched query, confidence and box columns; highlights the current image and marks outdated images. |
 | [result_filter_proxy_model.py](./result_filter_proxy_model.py) | `ResultFilterProxyModel`: sorted view listing the rows passing a `TableFilter`; supplies the header funnels and the values to filter by. |
 | [result_row.py](./result_row.py) | `ResultRow`: a detection or an image status row. |
 | [image_status_row.py](./image_status_row.py) | `ImageStatusRow`: row of an open image without any detection to list. |
@@ -30,4 +31,5 @@ header: text columns by checking values, numeric columns (confidence, box corner
 | [range_condition.py](./range_condition.py) | `RangeCondition`: bounds of a numeric column. |
 | [number_span.py](./number_span.py) | `NumberSpan`: smallest and largest value of a numeric column. |
 | [funnel_icon.py](./funnel_icon.py) | `FunnelIcon`: funnel icon, filled while a filter is in effect. |
+| [outdated_icon.py](./outdated_icon.py) | `OutdatedIcon`: warning triangle marking results detected with other classes. |
 | [result_column.py](./result_column.py) | `ResultColumn`: columns of the detection table. |

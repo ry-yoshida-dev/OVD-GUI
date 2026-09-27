@@ -9,7 +9,8 @@ class ProfileColumn(Enum):
     MODEL = 0
     OPTIONS = 1
     IMAGES = 2
-    DETECTIONS = 3
+    OUTDATED = 3
+    DETECTIONS = 4
 
     @property
     def header(self) -> str:
@@ -28,6 +29,8 @@ class ProfileColumn(Enum):
                 return "Options"
             case ProfileColumn.IMAGES:
                 return "Images"
+            case ProfileColumn.OUTDATED:
+                return "Outdated"
             case ProfileColumn.DETECTIONS:
                 return "Detections"
 
@@ -39,10 +42,10 @@ class ProfileColumn(Enum):
         Returns
         -------
         bool
-            True for the image and detection counts.
+            True for the image, outdated image and detection counts.
         """
         match self:
             case ProfileColumn.MODEL | ProfileColumn.OPTIONS:
                 return False
-            case ProfileColumn.IMAGES | ProfileColumn.DETECTIONS:
+            case ProfileColumn.IMAGES | ProfileColumn.OUTDATED | ProfileColumn.DETECTIONS:
                 return True

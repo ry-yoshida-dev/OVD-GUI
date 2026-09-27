@@ -18,10 +18,11 @@ images, type the classes to detect, pick a model, and see boxes and a detection 
   analyze; examples are boxed in a dialog, or the whole image is used. Each reference image becomes one more prompt
   of the class, next to its phrases. With a model that takes phrases only, classes that have reference images but no
   phrase are listed in a confirmation and, once accepted, left out of the run.
-- **The shown image is always detected**: opening an image detects it in the background with the current model
-  when it has no result yet, without blocking the window. Your own actions come first: `Detect`, `Detect All` and
-  export start right after the image being inferred, switching images quickly detects only the last one, and an
-  image opened during `Detect All` is detected next.
+- **Open images are detected in the background**: every open image without an up-to-date result for the current
+  model is detected one by one in the background, the shown image first, without blocking the window. Your own
+  actions come first: `Detect`, `Detect All` and export start right after the image being inferred, a newly shown
+  image is detected before the others, and an image opened during `Detect All` is detected next. A failed
+  background detection pauses the others until you open, show or detect images or edit the classes.
 - **Search across images**: `Detect All` detects every open image; the detection table lists the current image or
   all images with the image name, filters any column from the funnel in its header (checked values for image,
   class and query; bounds for confidence and box corners) and sorts by any column.
@@ -30,6 +31,10 @@ images, type the classes to detect, pick a model, and see boxes and a detection 
   thresholds). Detecting with another preset adds a row to the `Models` table above the detection table instead of
   replacing earlier results; selecting a row there switches the boxes and the detection table to that model's
   results. Results are kept in memory for the session only.
+- **Edit classes without losing results**: adding, removing or rewording a class keeps every result. Images detected
+  with other classes are marked with a warning icon in the detection table (its tool tip names the added, removed or
+  edited classes) and counted under `Outdated` in the `Models` table; they are detected again in the
+  background, the shown image first, and `Update Outdated` detects them all at once.
 - **Export to annotation formats**: every open image is detected with the current model and classes, and the
   results are saved as MS COCO, YOLO, Pascal VOC, LabelMe or Create ML with [ObjectDetectionFormat](https://github.com/ry-yoshida-dev/ObjectDetectionFormat).
 - **Classes are remembered**: the classes and their phrases are kept in `ovd_gui_data/` under the working directory
@@ -38,7 +43,7 @@ images, type the classes to detect, pick a model, and see boxes and a detection 
   `ovd_gui_data/classes/<name>.ovdset`, holding the classes, their phrases, the reference boxes and the pixels of
   every reference image, so loading it restores the image prompts even when the original image files are moved or
   gone, and the file can be copied to another machine. Plain class lists (`name` or `name: phrase, phrase` per line,
-  compatible with YOLO `classes.txt` and Darknet `.names`) can still be loaded with `From File...`.
+  compatible with YOLO `classes.txt` and Darknet `.names`) can still be loaded with `From File…`.
 - **GUI stays responsive**: loading and inference run on a worker thread.
 
 Weights are downloaded on first use; Ultralytics weights are saved to the current
@@ -66,19 +71,20 @@ python -m ovd_gui
 
 | Action | How |
 | ------ | --- |
-| Open images | Drop files or folders anywhere on the window, `Open Images...` / `Open Folder...`, or command-line arguments |
+| Open images | Drop files or folders anywhere on the window, `Open Images…` / `Open Folder…`, or command-line arguments |
 | Add a class or phrase | `+ Text` above the class tree adds a row next to the selection at the same level: a class after a selected class, a phrase after a selected phrase, a class at the end when nothing is selected (double-clicking the empty area also adds a class). Type the name and press Enter; Escape cancels. `suv, taxi` adds two phrases, and `car: car, suv` names the phrases of a new class |
 | Move a prompt | Drag a phrase onto another class or between its phrases to move it there; drop it between classes or below the rows to make it a class of its own. Reference images can be dragged to another class |
 | Edit or remove | Double-click a class or phrase to edit it; the trash button or Delete removes the selected classes, phrases or reference images; the same actions are in the right-click menu |
-| Save / load classes | The `Set` drop-down above the class tree lists the class sets saved in `ovd_gui_data/classes/`; choosing one loads it (asking first when the current classes were edited, which `Edited` marks). `Save...` next to it asks only for a set name and saves the classes with their phrases and reference images. `⋯` › `Load From File...` takes an `.ovdset` archive or a class list text file from elsewhere |
-| Manage class sets | `⋯` › `Class Sets...` opens the library: search sets and classes, preview the classes and image prompts of a set, `Load` (or double-click) to replace the current classes, rename in place (F2), delete with confirmation (Delete or the trash button), `Import...` / `Export...` `.ovdset` files |
+| Save / load classes | The `Set` drop-down above the class tree lists the class sets saved in `ovd_gui_data/classes/`; choosing one loads it (asking first whenever unsaved classes would be discarded; `Edited` marks edits since the set was loaded or saved). `Save…` next to it asks only for a set name and saves the classes with their phrases and reference images. The three-dot menu › `Open File…` takes an `.ovdset` archive or a class list text file from elsewhere |
+| Manage class sets | Three-dot menu › `Class Sets…` opens the library: search sets and classes, preview the classes and image prompts of a set, `Load` (or double-click) to replace the current classes, rename in place (F2), delete with confirmation (Delete or the trash button), `Import…` / `Export…` `.ovdset` files |
 | Add an image prompt | Select a class, press `+ Image`, drop example images or folders onto the window (or use `Open Images…` / `Open Folder…`), then drag boxes around the examples or press `Use Whole Image`; each image appears under the class as one prompt |
-| Detect | Open an image (detected in the background when it has no result yet), or `Detect` / Ctrl+Enter to detect it again |
+| Detect | Open an image (every image is detected in the background when it has no result yet), or `Detect` / Ctrl+Enter to detect it again |
 | Detect every image | `Detect All` or Ctrl+Shift+Enter (cancellable); every image fills in the table as it is detected |
 | Find images showing a class | Check the classes in the funnel menu above the table; click a column header to sort, e.g. by `Confidence` |
 | Jump to a detection | Select its row; its image opens and the box is highlighted |
 | Compare models | Detect with one preset, change the preset (or thresholds) and detect again; select a row of the `Models` table to switch between their results |
+| Refresh after editing classes | `Update Outdated` below the table detects again only the images marked outdated |
 | Forget results | `Remove` above the `Models` table (or Delete) forgets the selected model; `Clear Results` below the table forgets every model |
 | Fold panels | Click a sidebar section header |
 | Zoom | Mouse wheel; double-click fits the image again |
-| Export results | `Export...` or Ctrl+E; choose the format and output directory, then every open image is detected and saved (cancellable) |
+| Export results | `Export…` or Ctrl+E; choose the format and output directory, then every open image is detected and saved (cancellable) |

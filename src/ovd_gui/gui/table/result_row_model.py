@@ -1,13 +1,14 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPersistentModelIndex, Qt
-from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication, QPalette
+from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication, QIcon, QPalette
 
-from ...detection import DetectionCatalog, DetectionRecord
+from ...detection import DetectionCatalog, DetectionRecord, PromptChange
 from ..class_palette import ClassPalette
 from .analysis_state import AnalysisState
 from .image_status_row import ImageStatusRow
+from .outdated_icon import OutdatedIcon
 from .result_column import ResultColumn
 from .result_row import ResultRow
 
@@ -18,7 +19,8 @@ class ResultRowModel(QAbstractTableModel):
 
     An image without any detection to list, not analyzed yet or detected without result, keeps one
     ``ImageStatusRow`` saying so. Rows of one image stay contiguous, in the order the images were opened; replacing
-    the result of an image keeps its place. Rows of the current image are highlighted.
+    the result of an image keeps its place. Rows of the current image are highlighted. The image cell of an image
+    detected with other classes than the current ones carries a warning icon, and its tool tip names the change.
     ``SORT_ROLE`` gives raw values so that numbers sort numerically and image names case-insensitively.
     """
 
@@ -40,6 +42,8 @@ class ResultRowModel(QAbstractTableModel):
         self._rows: list[ResultRow] = []
         self._image_paths: list[Path] = []
         self._current_image_path: Path | None = None
+        self._prompt_changes: dict[Path, PromptChange] = {}
+        self._outdated_icon: QIcon = OutdatedIcon().to_icon()
 
     def rowCount(self, parent: QModelIndex | QPersistentModelIndex = ROOT_INDEX) -> int:
         return 0 if parent.isValid() else len(self._rows)
@@ -62,7 +66,9 @@ class ResultRowModel(QAbstractTableModel):
         if role == self.SORT_ROLE:
             return self._sort_value(row, column)
         if role == Qt.ItemDataRole.ToolTipRole and column == ResultColumn.IMAGE:
-            return str(row.image_path)
+            return self._image_tool_tip(row.image_path)
+        if role == Qt.ItemDataRole.DecorationRole and column == ResultColumn.IMAGE and self.is_outdated(row):
+            return self._outdated_icon
         if role == Qt.ItemDataRole.TextAlignmentRole and column.is_numeric:
             return self.NUMERIC_ALIGNMENT
         if role == Qt.ItemDataRole.BackgroundRole and self.is_current(row):
@@ -129,6 +135,67 @@ class ResultRowModel(QAbstractTableModel):
             True if ``row`` is highlighted.
         """
         return self._current_image_path is not None and row.image_path == self._current_image_path
+
+    @property
+    def outdated_image_paths(self) -> tuple[Path, ...]:
+        """
+        Listed images detected with other classes than the current ones.
+
+        Returns
+        -------
+        tuple[Path, ...]
+            Outdated images in the order they were opened.
+        """
+        return tuple(image_path for image_path in self._image_paths if image_path in self._prompt_changes)
+
+    def is_outdated(self, row: ResultRow) -> bool:
+        """
+        Whether a row belongs to an image detected with other classes than the current ones.
+
+        Parameters
+        ----------
+        row : ResultRow
+            Row to test.
+
+        Returns
+        -------
+        bool
+            True if the image of ``row`` carries a warning icon.
+        """
+        return row.image_path in self._prompt_changes
+
+    def prompt_change_of(self, image_path: Path) -> PromptChange | None:
+        """
+        How the classes have changed since one image was detected.
+
+        Parameters
+        ----------
+        image_path : Path
+            Image to look up.
+
+        Returns
+        -------
+        PromptChange | None
+            ``None`` if the image is not outdated.
+        """
+        return self._prompt_changes.get(image_path)
+
+    def set_prompt_changes(self, prompt_changes: Mapping[Path, PromptChange]) -> None:
+        """
+        Mark the images detected with other classes than the current ones.
+
+        Parameters
+        ----------
+        prompt_changes : Mapping[Path, PromptChange]
+            Change of every outdated image; other images are marked current.
+        """
+        previous_changes: dict[Path, PromptChange] = self._prompt_changes
+        self._prompt_changes = {
+            image_path: change for image_path, change in prompt_changes.items() if not change.is_unchanged
+        }
+        for image_path in previous_changes.keys() | self._prompt_changes.keys():
+            if previous_changes.get(image_path) != self._prompt_changes.get(image_path):
+                self._emit_rows_changed(image_path)
 
     def row_at(self, row: int) -> ResultRow:
         """
@@ -250,6 +317,7 @@ class ResultRowModel(QAbstractTableModel):
         """
         self.beginResetModel()
         self._rows = [row for image_path in self._image_paths for row in self._rows_from(catalog, image_path)]
+        self._prompt_changes = {}
         self.endResetModel()
 
     def set_current_image(self, image_path: Path | None) -> None:
@@ -299,8 +367,19 @@ class ResultRowModel(QAbstractTableModel):
             self.dataChanged.emit(
                 self.index(row_numbers[0], 0),
                 self.index(row_numbers[-1], len(ResultColumn) - 1),
-                [Qt.ItemDataRole.BackgroundRole, Qt.ItemDataRole.FontRole],
+                [
+                    Qt.ItemDataRole.BackgroundRole,
+                    Qt.ItemDataRole.FontRole,
+                    Qt.ItemDataRole.DecorationRole,
+                    Qt.ItemDataRole.ToolTipRole,
+                ],
             )
+
+    def _image_tool_tip(self, image_path: Path) -> str:
+        change: PromptChange | None = self._prompt_changes.get(image_path)
+        if change is None:
+            return str(image_path)
+        return f"{image_path}\nDetected with other classes: {change.description}"
 
     def _current_image_brush(self) -> QBrush:
         color: QColor = QGuiApplication.palette().color(QPalette.ColorRole.Highlight)

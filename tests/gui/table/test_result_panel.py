@@ -2,11 +2,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from open_vocabulary_detector import DetectionResult, ImageSize, Prompt
+from open_vocabulary_detector import DetectionResult, ImageSize, Prompt, PromptKind
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import QApplication, QTableView
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTableView
 
-from ovd_gui.detection import DetectionCatalog, DetectionRecord
+from ovd_gui.detection import DetectionCatalog, DetectionRecord, LabeledPrompt, PromptChange, ReferenceBoard
 from ovd_gui.gui.class_palette import ClassPalette
 from ovd_gui.gui.table import (
     AnalysisState,
@@ -19,6 +19,11 @@ from ovd_gui.gui.table import (
     ResultPanel,
     ValueChecklist,
     ValueCondition,
+)
+from ovd_gui.vocabulary import ClassDefinition
+
+CAT_DOG_PROMPT: LabeledPrompt = ReferenceBoard().build_prompt(
+    (ClassDefinition.named("cat"), ClassDefinition.named("dog")), frozenset({PromptKind.TEXT})
 )
 
 
@@ -40,7 +45,7 @@ def panel(application: QApplication) -> ResultPanel:
             prompt=Prompt.from_class_names(("cat", "dog")),
             image_size=ImageSize(width=100, height=50),
         )
-        result_panel.replace_image(image_path, catalog.record(image_path, result, ("cat", "dog")))
+        result_panel.replace_image(image_path, catalog.record(image_path, result, CAT_DOG_PROMPT))
     result_panel.set_current_image(Path("b.jpg"))
     return result_panel
 
@@ -61,6 +66,12 @@ def _table_view(panel: ResultPanel) -> QTableView:
 def _filter_classes(panel: ResultPanel, *class_names: str) -> None:
     condition: ValueCondition | None = ValueCondition(frozenset(class_names)) if class_names else None
     panel.set_column_filter(ResultColumn.CLASS, condition)
+
+
+def _selected_image(panel: ResultPanel) -> Path | None:
+    table_view: QTableView = _table_view(panel)
+    selected_rows: list[int] = [index.row() for index in table_view.selectionModel().selectedRows()]
+    return panel.visible_rows[selected_rows[0]].image_path if selected_rows else None
 
 
 def _statuses(panel: ResultPanel) -> list[tuple[str, AnalysisState]]:
@@ -246,8 +257,8 @@ def test_showing_a_catalog_lists_its_results_in_image_order(panel: ResultPanel) 
         prompt=Prompt.from_class_names(("cat", "dog")),
         image_size=ImageSize(width=100, height=50),
     )
-    catalog.record(Path("c.jpg"), result, ("cat", "dog"))
-    catalog.record(Path("a.jpg"), result.filter_by_confidence(0.9), ("cat", "dog"))
+    catalog.record(Path("c.jpg"), result, CAT_DOG_PROMPT)
+    catalog.record(Path("a.jpg"), result.filter_by_confidence(0.9), CAT_DOG_PROMPT)
     panel.show_catalog(catalog)
     assert _listed(panel) == [("c.jpg", "dog", 0.8)]
     assert _statuses(panel) == [
@@ -272,3 +283,62 @@ def test_selecting_a_row_reports_its_detection_or_image(panel: ResultPanel) -> N
     assert selected_images == [Path("d.jpg")]
     table_view.clearSelection()
     assert cleared == [True]
+
+
+def test_updating_rows_never_moves_the_selection_to_another_image(panel: ResultPanel) -> None:
+    table_view: QTableView = _table_view(panel)
+    table_view.selectRow(2)
+    reported_images: list[Path] = []
+    cleared: list[bool] = []
+    panel.detection_selected.connect(lambda record: reported_images.append(record.image_path))
+    panel.image_selected.connect(reported_images.append)
+    panel.selection_cleared.connect(lambda: cleared.append(True))
+
+    panel.replace_image(Path("b.jpg"), ())
+    assert _selected_image(panel) == Path("a.jpg")
+    assert cleared == []
+
+    panel.replace_image(Path("a.jpg"), ())
+    assert _selected_image(panel) is None
+    assert cleared == [True]
+
+    table_view.selectRow(3)
+    reported_images.clear()
+    _filter_classes(panel, "cat")
+    assert _selected_image(panel) is None
+    assert cleared == [True, True]
+    assert reported_images == []
+
+
+def test_outdated_images_are_marked_and_can_be_updated(panel: ResultPanel) -> None:
+    update_requests: list[bool] = []
+    panel.update_outdated_requested.connect(lambda: update_requests.append(True))
+    update_button: QPushButton = next(
+        button for button in panel.findChildren(QPushButton) if button.text() == "Update Outdated"
+    )
+    assert update_button.isHidden()
+
+    change: PromptChange = PromptChange(added_class_names=("bird",), removed_class_names=(), edited_class_names=())
+    panel.set_prompt_changes({Path("c.jpg"): change, Path("a.jpg"): change})
+    assert panel.outdated_image_paths == (Path("a.jpg"), Path("c.jpg"))
+    assert not update_button.isHidden()
+    summary_label: QLabel = next(label for label in panel.findChildren(QLabel) if "detections" in label.text())
+    assert "2 outdated" in summary_label.text()
+
+    table_view: QTableView | None = panel.findChild(QTableView)
+    assert table_view is not None
+    rows: dict[str, int] = {
+        table_view.model().index(row, ResultColumn.IMAGE.value).data(): row
+        for row in range(table_view.model().rowCount())
+    }
+    outdated_index = table_view.model().index(rows["c.jpg"], ResultColumn.IMAGE.value)
+    current_index = table_view.model().index(rows["b.jpg"], ResultColumn.IMAGE.value)
+    assert outdated_index.data(Qt.ItemDataRole.DecorationRole) is not None
+    assert "added bird" in outdated_index.data(Qt.ItemDataRole.ToolTipRole)
+    assert current_index.data(Qt.ItemDataRole.DecorationRole) is None
+
+    update_button.click()
+    assert update_requests == [True]
+    panel.set_prompt_changes({})
+    assert not panel.outdated_image_paths
+    assert update_button.isHidden()

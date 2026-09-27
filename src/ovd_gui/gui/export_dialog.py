@@ -45,7 +45,7 @@ class ExportDialog(QDialog):
         self._format_combo.addItems([annotation_format.display_name for annotation_format in self._formats])
         self._directory_edit: QLineEdit = QLineEdit()
         self._directory_edit.setPlaceholderText("Directory receiving the annotation files")
-        self._browse_button: QPushButton = QPushButton("Browse...")
+        self._browse_button: QPushButton = QPushButton("Browse…")
         self._confidence_check: QCheckBox = QCheckBox("Include confidence")
         self._confidence_check.setChecked(True)
         self._summary_label: QLabel = QLabel()

@@ -13,7 +13,7 @@ Sub-packages depend on the domain packages (`detection`, `vocabulary`, `storage`
 
 | Component | Description |
 | --------- | ----------- |
-| [main_window.py](./main_window.py) | `MainWindow`: layout, toolbar, stored results per model and image, switching the shown model, background detection of the shown image, background Detect All and export, drag and drop. |
+| [main_window.py](./main_window.py) | `MainWindow`: layout, toolbar, stored results per model and image, switching the shown model, background detection of every open image (shown image first), outdated results after class edits, background Detect All and export, drag and drop. |
 | [class_palette.py](./class_palette.py) | `ClassPalette`: stable color per class id, shared by every view. |
 | [export_dialog.py](./export_dialog.py) | `ExportDialog`: format, output directory and confidence choice for detecting every image and exporting. |
 | [prompt/](./prompt/README.md) | Class editor: classes, phrases and reference images, class sets. |

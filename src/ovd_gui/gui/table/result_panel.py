@@ -1,7 +1,7 @@
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from PySide6.QtCore import QItemSelection, QPoint, Qt, Signal
+from PySide6.QtCore import QItemSelection, QItemSelectionModel, QPoint, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...detection import DetectionCatalog, DetectionRecord
+from ...detection import DetectionCatalog, DetectionRecord, PromptChange
 from ..class_palette import ClassPalette
 from .analysis_state import AnalysisState
 from .column_condition import ColumnCondition
@@ -40,7 +40,12 @@ class ResultPanel(QWidget):
     the header: text columns by checking values, numeric columns by lower and upper bounds. A row is listed when it
     passes the filters of every column; clicking the rest of a header sorts. The table lists the results of one
     detector profile at a time, chosen by the window. Selecting a row reports its detection, or its image for an
-    image without detections, so that the window can show the image and highlight the box.
+    image without detections, so that the window can show the image and highlight the box. Only the user moves the
+    selection to another row: when results arrive or filters change, the selected row stays selected if it is still
+    listed, and the selection is cleared otherwise instead of moving to a row of another image.
+
+    Images detected with other classes, phrases or reference boxes than the current ones keep their rows, marked
+    with a warning icon whose tool tip names the change; ``Update Outdated`` asks to detect just those images again.
 
     Signals
     -------
@@ -52,12 +57,15 @@ class ResultPanel(QWidget):
         No row is selected any more.
     clear_requested : Signal()
         The user asked to forget the results of every model.
+    update_outdated_requested : Signal()
+        The user asked to detect the outdated images again with the current classes.
     """
 
     detection_selected: Signal = Signal(DetectionRecord)
     image_selected: Signal = Signal(Path)
     selection_cleared: Signal = Signal()
     clear_requested: Signal = Signal()
+    update_outdated_requested: Signal = Signal()
 
     def __init__(self, palette: ClassPalette, parent: QWidget | None = None) -> None:
         """
@@ -77,8 +85,11 @@ class ResultPanel(QWidget):
         self._summary_label: QLabel = QLabel()
         self._clear_filters_button: QPushButton = QPushButton("Clear Filters")
         self._clear_filters_button.setToolTip("List every row again")
+        self._update_outdated_button: QPushButton = QPushButton("Update Outdated")
+        self._update_outdated_button.setToolTip("Detect the images marked outdated again with the current classes")
         self._clear_button: QPushButton = QPushButton("Clear Results")
         self._clear_button.setToolTip("Forget the results of every model")
+        self._is_updating_rows: bool = False
 
         self._build_table_view()
         self._build_layout()
@@ -108,6 +119,18 @@ class ResultPanel(QWidget):
             Detection rows passing the filters, sorted as shown.
         """
         return tuple(row for row in self.visible_rows if isinstance(row, DetectionRecord))
+
+    @property
+    def outdated_image_paths(self) -> tuple[Path, ...]:
+        """
+        Images detected with other classes than the current ones.
+
+        Returns
+        -------
+        tuple[Path, ...]
+            Outdated images in the order they were opened.
+        """
+        return self._table_model.outdated_image_paths
 
     @property
     def table_filter(self) -> TableFilter:
@@ -145,14 +168,15 @@ class ResultPanel(QWidget):
                 raise TypeError(f"{column.header} is textual and takes a ValueCondition")
             case _:
                 pass
-        self._proxy_model.set_table_filter(self._proxy_model.table_filter.with_condition(column, condition))
+        table_filter: TableFilter = self._proxy_model.table_filter.with_condition(column, condition)
+        self._update_rows(lambda: self._proxy_model.set_table_filter(table_filter))
         self._update_summary()
 
     def clear_filters(self) -> None:
         """
         Stop filtering every column.
         """
-        self._proxy_model.set_table_filter(TableFilter())
+        self._update_rows(lambda: self._proxy_model.set_table_filter(TableFilter()))
         self._update_summary()
 
     def open_filter_popup(self, column: ResultColumn, position: QPoint | None = None) -> ColumnFilterPopup:
@@ -219,7 +243,7 @@ class ResultPanel(QWidget):
         image_paths : Sequence[Path]
             Opened images; images already listed are left as they are.
         """
-        self._table_model.add_images(image_paths)
+        self._update_rows(lambda: self._table_model.add_images(image_paths))
         self._update_summary()
 
     def set_current_image(self, image_path: Path | None) -> None:
@@ -245,7 +269,19 @@ class ResultPanel(QWidget):
         records : Sequence[DetectionRecord]
             Detections of ``image_path``.
         """
-        self._table_model.replace_image(image_path, records)
+        self._update_rows(lambda: self._table_model.replace_image(image_path, records))
+        self._update_summary()
+
+    def set_prompt_changes(self, prompt_changes: Mapping[Path, PromptChange]) -> None:
+        """
+        Mark the images detected with other classes than the current ones.
+
+        Parameters
+        ----------
+        prompt_changes : Mapping[Path, PromptChange]
+            Change of every outdated image; other images are marked current.
+        """
+        self._update_rows(lambda: self._table_model.set_prompt_changes(prompt_changes))
         self._update_summary()
 
     def show_catalog(self, catalog: DetectionCatalog | None) -> None:
@@ -257,7 +293,7 @@ class ResultPanel(QWidget):
         catalog : DetectionCatalog | None
             Results to list; ``None`` lists every image as not analyzed.
         """
-        self._table_model.show_catalog(catalog)
+        self._update_rows(lambda: self._table_model.show_catalog(catalog))
         self._update_summary()
 
     def _build_table_view(self) -> None:
@@ -280,6 +316,7 @@ class ResultPanel(QWidget):
         footer_row: QHBoxLayout = QHBoxLayout()
         footer_row.addWidget(self._summary_label, stretch=1)
         footer_row.addWidget(self._clear_filters_button)
+        footer_row.addWidget(self._update_outdated_button)
         footer_row.addWidget(self._clear_button)
         layout: QVBoxLayout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -290,6 +327,7 @@ class ResultPanel(QWidget):
         self._header_view.filter_requested.connect(self._on_filter_requested)
         self._clear_filters_button.clicked.connect(self.clear_filters)
         self._clear_button.clicked.connect(self.clear_requested)
+        self._update_outdated_button.clicked.connect(self.update_outdated_requested)
         self._table_view.selectionModel().selectionChanged.connect(self._emit_selection)
         self._proxy_model.rowsInserted.connect(self._update_summary)
         self._proxy_model.rowsRemoved.connect(self._update_summary)
@@ -307,11 +345,16 @@ class ResultPanel(QWidget):
             if isinstance(row, ImageStatusRow) and row.state == AnalysisState.NOT_ANALYZED
         )
         not_analyzed_note: str = f" · {not_analyzed_count} not analyzed" if not_analyzed_count else ""
+        outdated_count: int = len(self.outdated_image_paths)
+        outdated_note: str = f" · {outdated_count} outdated" if outdated_count else ""
         filtered_headers: list[str] = [
             column.header for column in ResultColumn if self.table_filter.condition_of(column) is not None
         ]
         filter_note: str = f" · filtered by {', '.join(filtered_headers)}" if filtered_headers else ""
-        self._summary_label.setText(f"{visible_count} / {total_count} detections{not_analyzed_note}{filter_note}")
+        self._summary_label.setText(
+            f"{visible_count} / {total_count} detections{not_analyzed_note}{outdated_note}{filter_note}"
+        )
+        self._update_outdated_button.setVisible(bool(outdated_count))
         self._clear_filters_button.setEnabled(bool(filtered_headers))
         self._clear_button.setEnabled(not_analyzed_count < len(self._table_model.rows))
 
@@ -330,7 +373,34 @@ class ResultPanel(QWidget):
     def _selected_proxy_rows(self) -> list[int]:
         return sorted({index.row() for index in self._table_view.selectionModel().selectedRows()})
 
+    def _selected_row(self) -> ResultRow | None:
+        selected_rows: list[int] = self._selected_proxy_rows()
+        return self._proxy_model.row_at(selected_rows[0]) if selected_rows else None
+
+    def _update_rows(self, update: Callable[[], None]) -> None:
+        previous_row: ResultRow | None = self._selected_row()
+        self._is_updating_rows = True
+        update()
+        is_selection_kept: bool = previous_row is None or self._select_silently(previous_row)
+        self._is_updating_rows = False
+        if not is_selection_kept:
+            self.selection_cleared.emit()
+
+    def _select_silently(self, row: ResultRow) -> bool:
+        selection_model: QItemSelectionModel = self._table_view.selectionModel()
+        for proxy_row in range(self._proxy_model.rowCount()):
+            if self._proxy_model.row_at(proxy_row) is row:
+                selection_model.setCurrentIndex(
+                    self._proxy_model.index(proxy_row, 0),
+                    QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows,
+                )
+                return True
+        selection_model.clearSelection()
+        return False
+
     def _emit_selection(self, selected: QItemSelection, deselected: QItemSelection) -> None:
+        if self._is_updating_rows:
+            return
         selected_rows: list[int] = self._selected_proxy_rows()
         if not selected_rows:
             self.selection_cleared.emit()

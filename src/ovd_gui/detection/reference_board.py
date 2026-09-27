@@ -7,6 +7,8 @@ from PIL import Image
 
 from ..vocabulary import ClassDefinition
 from .labeled_prompt import LabeledPrompt
+from .prompt_signature import PromptSignature
+from .queried_class import QueriedClass
 from .reference_box import ReferenceBox
 from .reference_image import ReferenceImage
 
@@ -266,6 +268,32 @@ class ReferenceBoard:
             if not definition.text_queries and self.reference_images_of(definition.name)
         )
 
+    def signature_of(self, definitions: Sequence[ClassDefinition]) -> PromptSignature:
+        """
+        What the classes query with their phrases and every reference box, whatever the model.
+
+        Parameters
+        ----------
+        definitions : Sequence[ClassDefinition]
+            Classes in class-id order.
+
+        Returns
+        -------
+        PromptSignature
+            Phrases and reference boxes of every class; narrow it to a model with
+            ``PromptSignature.for_prompt_kinds``.
+        """
+        return PromptSignature(
+            tuple(
+                QueriedClass(
+                    name=definition.name,
+                    phrases=frozenset(definition.text_queries),
+                    reference_boxes=frozenset(box for box in self._boxes if box.class_name == definition.name),
+                )
+                for definition in definitions
+            )
+        )
+
     def build_prompt(
         self, definitions: Sequence[ClassDefinition], supported_kinds: frozenset[PromptKind]
     ) -> LabeledPrompt:
@@ -282,7 +310,7 @@ class ReferenceBoard:
         Returns
         -------
         LabeledPrompt
-            Prompt and the label of each query.
+            Prompt, the label of each query and the signature of what it queries.
 
         Raises
         ------
@@ -309,7 +337,11 @@ class ReferenceBoard:
         if not class_queries:
             raise ValueError("Add at least one class to detect.")
         self._references = used_references
-        return LabeledPrompt(prompt=Prompt(class_queries), query_labels=tuple(query_labels))
+        return LabeledPrompt(
+            prompt=Prompt(class_queries),
+            query_labels=tuple(query_labels),
+            signature=self.signature_of(definitions).for_prompt_kinds(supported_kinds),
+        )
 
     @staticmethod
     def _describe_missing_queries(class_name: str, has_references: bool) -> str:

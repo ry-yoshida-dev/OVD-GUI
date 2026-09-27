@@ -26,7 +26,9 @@ class DetectionRunner(QObject):
     ``is_busy`` is True from its request until its outcome is reported. A background detection
     (``detect_in_background``) never makes the runner busy and always yields: it is ignored while a foreground run
     is requested, a foreground run requested meanwhile starts as soon as the image being inferred is done, and of
-    the background detections requested meanwhile only the latest is kept.
+    the background detections requested meanwhile only the latest is kept. The waiting run is sent before a
+    background outcome is reported, so a slot of ``background_succeeded`` or ``background_failed`` can request the
+    next background detection.
 
     Signals
     -------
@@ -267,8 +269,8 @@ class DetectionRunner(QObject):
     def _on_succeeded(self, outcome: DetectionOutcome) -> None:
         if self._background_request is not None:
             self._finish_background()
-            self.background_succeeded.emit(outcome)
             self._send_waiting_run()
+            self.background_succeeded.emit(outcome)
             return
         self.succeeded.emit(outcome)
         self._set_busy(False)
@@ -276,8 +278,8 @@ class DetectionRunner(QObject):
     def _on_failed(self, message: str) -> None:
         if self._background_request is not None:
             request: DetectionRequest = self._finish_background()
-            self.background_failed.emit(request, message)
             self._send_waiting_run()
+            self.background_failed.emit(request, message)
             return
         self.failed.emit(message)
         self._set_busy(False)

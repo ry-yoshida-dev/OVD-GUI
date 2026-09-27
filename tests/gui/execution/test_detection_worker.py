@@ -11,12 +11,14 @@ from open_vocabulary_detector import (
     ImageSize,
     OpenVocabularyDetector,
     Prompt,
+    PromptKind,
 )
 from PIL import Image
 from PySide6.QtWidgets import QApplication
 
-from ovd_gui.detection import BatchDetectionRequest, BatchDetectionSummary, LabeledPrompt
+from ovd_gui.detection import BatchDetectionRequest, BatchDetectionSummary, LabeledPrompt, ReferenceBoard
 from ovd_gui.gui.execution import DetectionWorker
+from ovd_gui.vocabulary import ClassDefinition
 
 
 class EmptyResultDetector(OpenVocabularyDetector):
@@ -40,7 +42,7 @@ class BatchRecorder:
 
 
 def _labeled_prompt() -> LabeledPrompt:
-    return LabeledPrompt(prompt=Prompt.from_class_names(("cat",)), query_labels=("cat",))
+    return ReferenceBoard().build_prompt((ClassDefinition.named("cat"),), frozenset({PromptKind.TEXT}))
 
 
 @pytest.fixture

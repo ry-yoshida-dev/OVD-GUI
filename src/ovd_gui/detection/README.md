@@ -10,6 +10,11 @@ Every class is queried by each of its phrases and, when the model takes image pr
 images (the boxes of one image are averaged into one query). A `LabeledPrompt` names every query, so a detection
 reports the phrase or reference image that matched it.
 
+Every result keeps the `PromptSignature` of its prompt (phrases and reference boxes per class), so editing the classes
+keeps the results and reports the images detected with other classes as outdated, with the `PromptChange` naming the
+added, removed and edited classes. Reference boxes are ignored when comparing results of a model without image
+prompts.
+
 ## Components
 
 | Component | Description |
@@ -22,11 +27,14 @@ reports the phrase or reference image that matched it.
 | [batch_detection_summary.py](./batch_detection_summary.py) | `BatchDetectionSummary`: detected count, skipped unreadable files and whether the batch was cancelled. |
 | [reference_image.py](./reference_image.py) | `ReferenceImage`: identity of a reference image by display name and pixel SHA-256, independent of any file path. |
 | [reference_box.py](./reference_box.py) | `ReferenceBox`: box drawn on a reference image around an example of a class. |
-| [reference_board.py](./reference_board.py) | `ReferenceBoard`: reference boxes per class and image with the pixels of every boxed image, replaceable at once when a class set is loaded; builds the `LabeledPrompt` of the classes, one visual query per reference image, reusing unchanged `VisualReference`s; lists the reference-only classes a text-only model cannot query. |
-| [labeled_prompt.py](./labeled_prompt.py) | `LabeledPrompt`: `Prompt` with a display label per query (phrase or reference image name). |
+| [reference_board.py](./reference_board.py) | `ReferenceBoard`: reference boxes per class and image with the pixels of every boxed image, replaceable at once when a class set is loaded; builds the `LabeledPrompt` and `PromptSignature` of the classes, one visual query per reference image, reusing unchanged `VisualReference`s; lists the reference-only classes a text-only model cannot query. |
+| [labeled_prompt.py](./labeled_prompt.py) | `LabeledPrompt`: `Prompt` with a display label per query (phrase or reference image name) and its `PromptSignature`. |
+| [prompt_signature.py](./prompt_signature.py) | `PromptSignature`: what a prompt queries per class, narrowed to the query kinds a model accepts. |
+| [queried_class.py](./queried_class.py) | `QueriedClass`: phrases and reference boxes of one queried class, compared regardless of order. |
+| [prompt_change.py](./prompt_change.py) | `PromptChange`: classes added, removed or edited since a result was detected. |
 | [detection_outcome.py](./detection_outcome.py) | `DetectionOutcome`: result, inference time and whether the model was reloaded. |
 | [detector_profile.py](./detector_profile.py) | `DetectorProfile`: model, device, precision and thresholds a result was detected with; equal for runs differing only in batch size. |
-| [result_library.py](./result_library.py) | `ResultLibrary`: one `DetectionCatalog` per detector profile, in the order the profiles were added. |
-| [profile_summary.py](./profile_summary.py) | `ProfileSummary`: image and detection counts of one profile. |
-| [detection_catalog.py](./detection_catalog.py) | `DetectionCatalog`: latest result and query labels per image, listed as individual detections for searching across images. |
+| [result_library.py](./result_library.py) | `ResultLibrary`: one `DetectionCatalog` per detector profile, in the order the profiles were added; reports the outdated images of each profile. |
+| [profile_summary.py](./profile_summary.py) | `ProfileSummary`: image, outdated image and detection counts of one profile. |
+| [detection_catalog.py](./detection_catalog.py) | `DetectionCatalog`: latest result and labeled prompt per image, listed as individual detections for searching across images; compares each prompt with the current one. |
 | [detection_record.py](./detection_record.py) | `DetectionRecord`: one detection with its image path, index in that image's result and matched query label. |

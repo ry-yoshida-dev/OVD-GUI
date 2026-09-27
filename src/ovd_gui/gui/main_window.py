@@ -32,6 +32,8 @@ from ..detection import (
     DetectorProfile,
     DeviceAvailability,
     LabeledPrompt,
+    PromptChange,
+    PromptSignature,
     ReferenceBoard,
     ResultLibrary,
 )
@@ -61,11 +63,14 @@ class MainWindow(QMainWindow):
     appear as each image finishes, and the status bar shows its progress with a Cancel button. Selecting a detection
     of another image in the table opens that image.
 
-    The image being shown is always detected in the background when the current model has no result for it yet,
-    without blocking the window. What the user does on screen comes first: Detect, Detect All and Export start as
-    soon as the image being inferred in the background is done, only the latest shown image waits for background
-    detection when images are switched quickly, an image shown while Detect All runs is detected next in the batch,
-    and no background detection replaces the results of another model the user selected in the model table.
+    Open images are detected one by one in the background when the current model has no up-to-date result for
+    them, without blocking the window: the shown image first, then the other images in list order. An image whose
+    background detection failed is not retried by itself for the same model until the classes change, and a failure
+    pauses the detection of the other images until the user opens, shows or detects images or edits the classes.
+    What the user does on screen comes first: Detect, Detect All and Export start as soon as the image being
+    inferred in the background is done, a newly shown image is detected before the other images, an image shown
+    while Detect All runs is detected next in the batch, and no background detection replaces the results of
+    another model the user selected in the model table.
 
     Results are kept per detector profile (model, device, precision and thresholds): detecting with another model
     adds a row to the model table above the detection table instead of replacing earlier results, and selecting a
@@ -73,6 +78,10 @@ class MainWindow(QMainWindow):
 
     Every class is queried by its phrases and, with a backend that takes image prompts (OWL-ViT, YOLOE), by its
     reference images. Detections are reported under the class and name the query that matched.
+
+    Editing the classes, phrases or reference images keeps every stored result. Images detected with other classes
+    than the current ones are marked outdated in the detection table and counted in the model table, and are
+    detected again in the background, the shown image first; Update Outdated detects them again in one batch.
 
     Images and folders can be dropped anywhere on the window; while dragging, an overlay previews what the drop
     adds. Until an image is open, the center shows a drop zone instead of the image.
@@ -123,6 +132,9 @@ class MainWindow(QMainWindow):
         self._reference_board: ReferenceBoard = ReferenceBoard()
         self._approved_skipped_classes: frozenset[str] = frozenset()
         self._is_profile_pinned: bool = False
+        self._is_background_queue_paused: bool = False
+        self._failed_background_detections: set[tuple[DetectorProfile, Path]] = set()
+        self._unreadable_paths: set[Path] = set()
 
         palette: ClassPalette = ClassPalette()
         self._settings_panel: SettingsPanel = SettingsPanel(catalog, device_availability)
@@ -142,7 +154,7 @@ class MainWindow(QMainWindow):
         self._detect_all_button: QPushButton = QPushButton("Detect All")
         self._summary_label: QLabel = QLabel()
         self._export_dialog: ExportDialog = ExportDialog(self)
-        self._export_action: QAction = QAction("Export...", self)
+        self._export_action: QAction = QAction("Export…", self)
 
         self._runner: DetectionRunner = DetectionRunner(self)
         self._batch_progress_dialog: BatchProgressDialog = BatchProgressDialog(self._runner, self)
@@ -181,6 +193,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             collection.describe(f"Added {added_count} image{'' if added_count == 1 else 's'}"), 5000
         )
+        self._resume_background_detection()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._runner.shutdown()
@@ -241,10 +254,10 @@ class MainWindow(QMainWindow):
     def _build_toolbar(self) -> None:
         toolbar: QToolBar = self.addToolBar("Main")
         toolbar.setMovable(False)
-        open_images_action: QAction = QAction("Open Images...", self)
+        open_images_action: QAction = QAction("Open Images…", self)
         open_images_action.setShortcut(QKeySequence.StandardKey.Open)
         open_images_action.triggered.connect(self._choose_images)
-        open_folder_action: QAction = QAction("Open Folder...", self)
+        open_folder_action: QAction = QAction("Open Folder…", self)
         open_folder_action.triggered.connect(self._choose_folder)
         toolbar.addAction(open_images_action)
         toolbar.addAction(open_folder_action)
@@ -282,6 +295,8 @@ class MainWindow(QMainWindow):
         self._result_panel.image_selected.connect(self._on_result_image_selected)
         self._result_panel.selection_cleared.connect(self._on_detection_selection_cleared)
         self._result_panel.clear_requested.connect(self._clear_results)
+        self._result_panel.update_outdated_requested.connect(self._update_outdated)
+        self._class_editor.classes_changed.connect(self._on_classes_changed)
         self._profile_panel.profile_selected.connect(self._on_profile_selected)
         self._profile_panel.removal_requested.connect(self._remove_profile)
         self._drop_zone.open_images_requested.connect(self._choose_images)
@@ -326,14 +341,18 @@ class MainWindow(QMainWindow):
         self._show_stored_result()
         width, height = self._current_image.image.size
         self.statusBar().showMessage(f"{path.name} ({width}x{height})")
-        self._detect_shown_image_in_background()
+        self._resume_background_detection()
 
-    def _detect_shown_image_in_background(self) -> None:
-        image: LoadedImage | None = self._current_image
-        if image is None or not self._class_editor.classes:
+    def _resume_background_detection(self) -> None:
+        self._is_background_queue_paused = False
+        self._detect_in_background()
+
+    def _detect_in_background(self) -> None:
+        if not self._class_editor.classes:
             return
         if self._runner.is_busy:
-            self._runner.prioritize(image.path)
+            if self._current_image is not None:
+                self._runner.prioritize(self._current_image.path)
             return
         try:
             settings: DetectorSettings = self._settings_panel.current_settings()
@@ -343,7 +362,10 @@ class MainWindow(QMainWindow):
         is_other_profile_pinned: bool = (
             self._is_profile_pinned and self._shown_profile is not None and profile != self._shown_profile
         )
-        if is_other_profile_pinned or self._is_detected(image.path, profile):
+        if is_other_profile_pinned:
+            return
+        image: LoadedImage | None = self._next_background_image(profile)
+        if image is None:
             return
         labeled_prompt: LabeledPrompt | None = self._build_background_prompt()
         if labeled_prompt is None:
@@ -353,8 +375,47 @@ class MainWindow(QMainWindow):
             DetectionRequest(settings=settings, image_path=image.path, image=image.image, labeled_prompt=labeled_prompt)
         )
 
-    def _is_detected(self, image_path: Path, profile: DetectorProfile) -> bool:
-        return profile in self._result_library and image_path in self._result_library.catalog_of(profile)
+    def _next_background_image(self, profile: DetectorProfile) -> LoadedImage | None:
+        signature: PromptSignature = self._current_signature()
+        shown_image: LoadedImage | None = self._current_image
+        if shown_image is not None and not self._is_up_to_date(shown_image.path, profile, signature):
+            return shown_image
+        if self._is_background_queue_paused:
+            return None
+        for image_path in self._image_list.image_paths:
+            is_skipped: bool = (
+                image_path in self._unreadable_paths
+                or (profile, image_path) in self._failed_background_detections
+                or self._is_up_to_date(image_path, profile, signature)
+            )
+            if is_skipped:
+                continue
+            try:
+                return LoadedImage.open(image_path)
+            except OSError:
+                self._unreadable_paths.add(image_path)
+        return None
+
+    def _is_up_to_date(self, image_path: Path, profile: DetectorProfile, signature: PromptSignature) -> bool:
+        change: PromptChange | None = self._result_library.prompt_change_of(profile, image_path, signature)
+        return change is not None and change.is_unchanged
+
+    def _current_signature(self) -> PromptSignature:
+        return self._reference_board.signature_of(self._class_editor.classes)
+
+    def _on_classes_changed(self) -> None:
+        self._failed_background_detections.clear()
+        self._refresh_outdated_marks()
+        self._resume_background_detection()
+
+    def _refresh_outdated_marks(self) -> None:
+        self._refresh_profile_panel()
+        if self._shown_profile is None:
+            self._result_panel.set_prompt_changes({})
+            return
+        self._result_panel.set_prompt_changes(
+            self._result_library.outdated_images(self._shown_profile, self._current_signature())
+        )
 
     def _show_stored_result(self) -> None:
         self._canvas.clear_detections()
@@ -406,8 +467,11 @@ class MainWindow(QMainWindow):
     def _on_background_detection_succeeded(self, outcome: DetectionOutcome) -> None:
         self._record_outcome(outcome)
         self.statusBar().clearMessage()
+        self._detect_in_background()
 
     def _on_background_detection_failed(self, request: DetectionRequest, message: str) -> None:
+        self._failed_background_detections.add((DetectorProfile.of(request.settings), request.image_path))
+        self._is_background_queue_paused = True
         self.statusBar().showMessage(f"Background detection of {request.image_path.name} failed: {message}")
 
     def _record_outcome(self, outcome: DetectionOutcome) -> None:
@@ -415,7 +479,7 @@ class MainWindow(QMainWindow):
             DetectorProfile.of(outcome.request.settings),
             outcome.request.image_path,
             outcome.result,
-            outcome.request.labeled_prompt.query_labels,
+            outcome.request.labeled_prompt,
         )
         if self._current_image is None or self._current_image.path != outcome.request.image_path:
             return
@@ -477,13 +541,14 @@ class MainWindow(QMainWindow):
         return is_approved
 
     def _record_result(
-        self, profile: DetectorProfile, image_path: Path, result: DetectionResult, query_labels: tuple[str, ...]
+        self, profile: DetectorProfile, image_path: Path, result: DetectionResult, labeled_prompt: LabeledPrompt
     ) -> None:
-        records: tuple[DetectionRecord, ...] = self._result_library.record(profile, image_path, result, query_labels)
-        self._refresh_profile_panel()
+        records: tuple[DetectionRecord, ...] = self._result_library.record(profile, image_path, result, labeled_prompt)
         if profile != self._shown_profile:
+            self._refresh_profile_panel()
             return
         self._result_panel.replace_image(image_path, records)
+        self._refresh_outdated_marks()
         if self._current_image is not None and self._current_image.path == image_path:
             self._canvas.show_result(result)
 
@@ -497,12 +562,13 @@ class MainWindow(QMainWindow):
     def _on_profile_selected(self, profile: DetectorProfile) -> None:
         self._is_profile_pinned = True
         self._display_profile(profile)
-        self._detect_shown_image_in_background()
+        self._resume_background_detection()
 
     def _display_profile(self, profile: DetectorProfile | None) -> None:
         self._shown_profile = profile
         catalog: DetectionCatalog | None = None if profile is None else self._result_library.catalog_of(profile)
         self._result_panel.show_catalog(catalog)
+        self._refresh_outdated_marks()
         self._show_stored_result()
         self._summary_label.clear()
 
@@ -511,24 +577,50 @@ class MainWindow(QMainWindow):
         if profile == self._shown_profile:
             remaining_profiles: tuple[DetectorProfile, ...] = self._result_library.profiles
             self._display_profile(remaining_profiles[-1] if remaining_profiles else None)
+            return
         self._refresh_profile_panel()
 
     def _refresh_profile_panel(self) -> None:
-        self._profile_panel.set_summaries(self._result_library.summaries(), self._shown_profile)
+        self._profile_panel.set_summaries(
+            self._result_library.summaries(self._current_signature()), self._shown_profile
+        )
 
     def _clear_results(self) -> None:
         self._result_library.clear()
         self._display_profile(None)
-        self._refresh_profile_panel()
 
     def _detect_all(self) -> None:
         if not self._is_ready_to_detect(self._missing_images_notice()):
             return
-        request: BatchDetectionRequest | None = self._build_batch_request()
+        request: BatchDetectionRequest | None = self._build_batch_request(self._image_list.image_paths)
         if request is None:
             return
         self._switch_to(DetectorProfile.of(request.settings))
         self._runner.detect_batch(BatchJob.detect_all(request))
+
+    def _update_outdated(self) -> None:
+        outdated_paths: tuple[Path, ...] = self._result_panel.outdated_image_paths
+        if not self._is_ready_to_detect(None if outdated_paths else "No outdated images to update."):
+            return
+        shown_profile: DetectorProfile | None = self._shown_profile
+        if shown_profile is not None and not self._is_selected_in_settings(shown_profile):
+            self.statusBar().showMessage(
+                f"The outdated images were detected with {shown_profile.model_name} "
+                + f"({shown_profile.options_text}); choose these model settings to update them."
+            )
+            return
+        request: BatchDetectionRequest | None = self._build_batch_request(outdated_paths)
+        if request is None:
+            return
+        self._switch_to(DetectorProfile.of(request.settings))
+        self._runner.detect_batch(BatchJob.detect_all(request))
+
+    def _is_selected_in_settings(self, profile: DetectorProfile) -> bool:
+        try:
+            settings: DetectorSettings = self._settings_panel.current_settings()
+        except ValueError:
+            return False
+        return DetectorProfile.of(settings) == profile
 
     def _export_detections(self) -> None:
         if not self._is_ready_to_detect(self._missing_images_notice()):
@@ -536,7 +628,7 @@ class MainWindow(QMainWindow):
         options: ExportOptions | None = self._export_dialog.ask(len(self._image_list.image_paths))
         if options is None:
             return
-        request: BatchDetectionRequest | None = self._build_batch_request()
+        request: BatchDetectionRequest | None = self._build_batch_request(self._image_list.image_paths)
         if request is None:
             return
         self._detection_archive.clear()
@@ -546,7 +638,7 @@ class MainWindow(QMainWindow):
     def _missing_images_notice(self) -> str | None:
         return None if self._image_list.image_paths else "Open images first."
 
-    def _build_batch_request(self) -> BatchDetectionRequest | None:
+    def _build_batch_request(self, image_paths: tuple[Path, ...]) -> BatchDetectionRequest | None:
         try:
             settings: DetectorSettings = self._settings_panel.current_settings()
             labeled_prompt: LabeledPrompt | None = self._build_prompt()
@@ -555,14 +647,10 @@ class MainWindow(QMainWindow):
             return None
         if labeled_prompt is None:
             return None
-        return BatchDetectionRequest(
-            settings=settings, labeled_prompt=labeled_prompt, image_paths=self._image_list.image_paths
-        )
+        return BatchDetectionRequest(settings=settings, labeled_prompt=labeled_prompt, image_paths=image_paths)
 
     def _on_batch_image_detected(self, job: BatchJob, image_path: Path, result: DetectionResult) -> None:
-        self._record_result(
-            DetectorProfile.of(job.request.settings), image_path, result, job.request.labeled_prompt.query_labels
-        )
+        self._record_result(DetectorProfile.of(job.request.settings), image_path, result, job.request.labeled_prompt)
         match job.purpose:
             case BatchPurpose.DETECT_ALL:
                 return
@@ -635,4 +723,4 @@ class MainWindow(QMainWindow):
         self._export_action.setEnabled(not is_busy)
         self._settings_panel.setEnabled(not is_busy)
         if not is_busy:
-            self._detect_shown_image_in_background()
+            self._resume_background_detection()

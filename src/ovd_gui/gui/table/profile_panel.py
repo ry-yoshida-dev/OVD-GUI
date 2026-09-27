@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...detection import DetectorProfile, ProfileSummary
+from .outdated_icon import OutdatedIcon
 from .profile_column import ProfileColumn
 
 
@@ -24,7 +25,8 @@ class ProfilePanel(QWidget):
     Table of the models whose results are stored, one row per detector profile.
 
     The selected row is the profile whose results the window shows; selecting another row switches to its results
-    without detecting again. The selected profile can be removed with the Remove button, the Delete key or the
+    without detecting again. ``Outdated`` counts the images of a profile detected with other classes, phrases or
+    reference boxes than the current ones. The selected profile can be removed with the Remove button, the Delete key or the
     right-click menu.
 
     Signals
@@ -178,10 +180,17 @@ class ProfilePanel(QWidget):
                 summary.profile.model_name,
                 summary.profile.options_text,
                 str(summary.image_count),
+                str(summary.outdated_image_count) if summary.outdated_image_count else "",
                 str(summary.detection_count),
             ]
         )
         item.setToolTip(ProfileColumn.MODEL.value, f"{summary.profile.backend.value}: {summary.profile.weights_path}")
+        if summary.outdated_image_count:
+            item.setIcon(ProfileColumn.OUTDATED.value, OutdatedIcon().to_icon())
+            item.setToolTip(
+                ProfileColumn.OUTDATED.value,
+                f"{summary.outdated_image_count} of {summary.image_count} images were detected with other classes",
+            )
         for column in ProfileColumn:
             if column.is_numeric:
                 item.setTextAlignment(column.value, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)

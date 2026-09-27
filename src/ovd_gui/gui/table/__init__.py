@@ -5,6 +5,7 @@ from .filter_header_view import FilterHeaderView
 from .funnel_icon import FunnelIcon
 from .image_status_row import ImageStatusRow
 from .number_span import NumberSpan
+from .outdated_icon import OutdatedIcon
 from .profile_column import ProfileColumn
 from .profile_panel import ProfilePanel
 from .range_condition import RangeCondition
@@ -26,6 +27,7 @@ __all__ = [
     "FunnelIcon",
     "ImageStatusRow",
     "NumberSpan",
+    "OutdatedIcon",
     "ProfileColumn",
     "ProfilePanel",
     "RangeCondition",
