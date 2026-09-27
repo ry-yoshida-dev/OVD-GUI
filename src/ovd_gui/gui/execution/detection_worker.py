@@ -6,6 +6,8 @@ from PySide6.QtCore import QObject, Signal, Slot
 from ...detection import (
     BatchDetectionRequest,
     BatchDetectionSummary,
+    DetectionFailure,
+    DetectionFailureKind,
     DetectionOutcome,
     DetectionRequest,
     DetectorSession,
@@ -15,10 +17,11 @@ from ...media import LoadedImage
 
 class DetectionWorker(QObject):
     """
-    Runs model loading and inference off the GUI thread.
+    Runs image reading, model loading and inference off the GUI thread.
 
     Move the worker to a ``QThread`` and send it requests through queued signals connected to ``run``
-    and ``run_batch``.
+    and ``run_batch``. Every request ends with exactly one of its outcome signals, whatever is raised while it runs,
+    so the owner of the worker is never left waiting.
 
     Signals
     -------
@@ -26,8 +29,8 @@ class DetectionWorker(QObject):
         Progress message.
     succeeded : Signal(DetectionOutcome)
         Detections of a finished request.
-    failed : Signal(str)
-        Error message of a failed request.
+    failed : Signal(DetectionFailure)
+        Why a request failed.
     batch_progressed : Signal(int, int)
         Images processed so far and the total of the running batch.
     image_detected : Signal(Path, DetectionResult)
@@ -40,20 +43,11 @@ class DetectionWorker(QObject):
 
     status_changed: Signal = Signal(str)
     succeeded: Signal = Signal(DetectionOutcome)
-    failed: Signal = Signal(str)
+    failed: Signal = Signal(DetectionFailure)
     batch_progressed: Signal = Signal(int, int)
     image_detected: Signal = Signal(Path, DetectionResult)
     batch_finished: Signal = Signal(BatchDetectionSummary)
     batch_failed: Signal = Signal(str)
-
-    REPORTED_ERRORS: tuple[type[Exception], ...] = (
-        OSError,
-        RuntimeError,
-        ValueError,
-        KeyError,
-        TypeError,
-        ImportError,
-    )
 
     def __init__(self) -> None:
         super().__init__()
@@ -62,24 +56,29 @@ class DetectionWorker(QObject):
     @Slot(DetectionRequest)
     def run(self, request: DetectionRequest) -> None:
         """
-        Load the requested model if needed and detect.
+        Read the image, load the requested model if needed and detect.
 
-        Errors of ``REPORTED_ERRORS`` (download, loading, device and input errors) are reported through
-        ``failed`` so that the GUI keeps running.
+        Every error is reported through ``failed`` so that the GUI keeps running: an error while reading the image
+        file as ``UNREADABLE_IMAGE``, any error while loading the model or detecting as ``DETECTION_ERROR``.
 
         Parameters
         ----------
         request : DetectionRequest
-            Settings, image and prompt.
+            Settings, image file and prompt.
         """
         if not self._session.is_loaded_for(request.settings):
             self.status_changed.emit(f"Loading {request.settings.weights_path} ...")
         else:
             self.status_changed.emit("Detecting ...")
         try:
-            outcome: DetectionOutcome = self._session.detect(request)
-        except self.REPORTED_ERRORS as error:
-            self.failed.emit(f"{type(error).__name__}: {error}")
+            loaded_image: LoadedImage = LoadedImage.open(request.image_path)
+        except Exception as error:
+            self.failed.emit(DetectionFailure.of(DetectionFailureKind.UNREADABLE_IMAGE, error))
+            return
+        try:
+            outcome: DetectionOutcome = self._session.detect(request, loaded_image.image)
+        except Exception as error:
+            self.failed.emit(DetectionFailure.of(DetectionFailureKind.DETECTION_ERROR, error))
             return
         self.succeeded.emit(outcome)
 
@@ -88,9 +87,9 @@ class DetectionWorker(QObject):
         """
         Detect in every image of the batch, loading the model once if needed.
 
-        Unreadable image files are skipped; an error of ``REPORTED_ERRORS`` while loading the model or detecting
-        stops the batch and is reported through ``batch_failed``. Cancellation and images prioritized from another
-        thread are checked before each image.
+        Image files that cannot be read are skipped; any error while loading the model or detecting stops the batch
+        and is reported through ``batch_failed``. Cancellation and images prioritized from another thread are
+        checked before each image.
 
         Parameters
         ----------
@@ -107,7 +106,7 @@ class DetectionWorker(QObject):
             self.batch_progressed.emit(processed_count, total_count)
             try:
                 loaded_image: LoadedImage = LoadedImage.open(image_path)
-            except OSError:
+            except Exception:
                 unreadable_paths.append(image_path)
                 continue
             self.status_changed.emit(f"Detecting {image_path.name} ({processed_count + 1}/{total_count}) ...")
@@ -116,11 +115,11 @@ class DetectionWorker(QObject):
                     DetectionRequest(
                         settings=request.settings,
                         image_path=image_path,
-                        image=loaded_image.image,
                         labeled_prompt=request.labeled_prompt,
-                    )
+                    ),
+                    loaded_image.image,
                 )
-            except self.REPORTED_ERRORS as error:
+            except Exception as error:
                 self.batch_failed.emit(f"{image_path.name}: {type(error).__name__}: {error}")
                 return
             detected_count += 1

@@ -79,6 +79,15 @@ def test_class_without_usable_query_is_rejected() -> None:
         board.build_prompt(_classes("cup:"), ALL_KINDS)
 
 
+def test_prompt_issue_reports_what_build_prompt_would_reject() -> None:
+    board: ReferenceBoard = ReferenceBoard()
+    board.add(_box("mug"), _image())
+    assert board.prompt_issue(_classes("mug:", "dog"), ALL_KINDS) is None
+    assert "only by reference images" in (board.prompt_issue(_classes("mug:"), TEXT_ONLY) or "")
+    assert "no phrase and no reference image" in (board.prompt_issue(_classes("cup:"), ALL_KINDS) or "")
+    assert board.prompt_issue((), ALL_KINDS) == "Add at least one class to detect."
+
+
 def test_reference_only_classes_are_listed_only_without_visual_support() -> None:
     board: ReferenceBoard = ReferenceBoard()
     board.add(_box("mug"), _image())

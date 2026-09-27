@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from pathlib import Path
 
 from open_vocabulary_detector import DetectionResult
@@ -15,11 +16,15 @@ class DetectionCatalog:
     Recording an image again replaces its previous result; images keep the order in which they were first recorded.
     Each result is kept with the labeled prompt it was detected with, so detections name the query that matched them
     and a result can tell how the classes have changed since.
+
+    Every detection is accepted until the user rejects it; rejected detections stay stored but are left out of
+    exports. Recording an image again accepts every detection of its new result.
     """
 
     def __init__(self) -> None:
         self._results: dict[Path, DetectionResult] = {}
         self._prompts: dict[Path, LabeledPrompt] = {}
+        self._rejected_indices: dict[Path, frozenset[int]] = {}
 
     def __len__(self) -> int:
         return len(self._results)
@@ -58,6 +63,7 @@ class DetectionCatalog:
             )
         self._results[image_path] = result
         self._prompts[image_path] = labeled_prompt
+        self._rejected_indices.pop(image_path, None)
         return self.records_of(image_path)
 
     def result_of(self, image_path: Path) -> DetectionResult | None:
@@ -75,6 +81,113 @@ class DetectionCatalog:
             ``None`` if the image has not been detected.
         """
         return self._results.get(image_path)
+
+    def labeled_prompt_of(self, image_path: Path) -> LabeledPrompt | None:
+        """
+        Prompt one image was detected with.
+
+        Parameters
+        ----------
+        image_path : Path
+            Image to look up.
+
+        Returns
+        -------
+        LabeledPrompt | None
+            ``None`` if the image has not been detected.
+        """
+        return self._prompts.get(image_path)
+
+    @property
+    def image_paths(self) -> tuple[Path, ...]:
+        """
+        Detected images.
+
+        Returns
+        -------
+        tuple[Path, ...]
+            Images in recording order.
+        """
+        return tuple(self._results)
+
+    def is_accepted(self, record: DetectionRecord) -> bool:
+        """
+        Whether a detection is kept for export.
+
+        Parameters
+        ----------
+        record : DetectionRecord
+            Detection of a recorded image.
+
+        Returns
+        -------
+        bool
+            False once the user rejected it.
+        """
+        return record.detection_index not in self._rejected_indices.get(record.image_path, frozenset())
+
+    def rejected_indices_of(self, image_path: Path) -> frozenset[int]:
+        """
+        Rejected detections of one image.
+
+        Parameters
+        ----------
+        image_path : Path
+            Image to look up.
+
+        Returns
+        -------
+        frozenset[int]
+            Indices of the rejected detections in the result of the image; empty if none is rejected or the image
+            has not been detected.
+        """
+        return self._rejected_indices.get(image_path, frozenset())
+
+    def set_accepted(self, image_path: Path, detection_indices: Iterable[int], is_accepted: bool) -> None:
+        """
+        Accept or reject some detections of one image.
+
+        Parameters
+        ----------
+        image_path : Path
+            Recorded image.
+        detection_indices : Iterable[int]
+            Indices of the detections in the result of the image.
+        is_accepted : bool
+            True to accept them, False to reject them.
+
+        Raises
+        ------
+        KeyError
+            If the image has not been detected.
+        IndexError
+            If an index is outside the result of the image; nothing is changed.
+        """
+        result: DetectionResult | None = self._results.get(image_path)
+        if result is None:
+            raise KeyError(f"{image_path} has not been detected")
+        indices: frozenset[int] = frozenset(detection_indices)
+        if any(not 0 <= index < len(result) for index in indices):
+            raise IndexError(f"detection indices must be in [0, {len(result)}). got {sorted(indices)}")
+        rejected: frozenset[int] = self.rejected_indices_of(image_path)
+        rejected = rejected - indices if is_accepted else rejected | indices
+        if rejected:
+            self._rejected_indices[image_path] = rejected
+        else:
+            self._rejected_indices.pop(image_path, None)
+
+    def remove(self, image_path: Path) -> None:
+        """
+        Forget the result of one image.
+
+        Parameters
+        ----------
+        image_path : Path
+            Image to forget; nothing happens if it has not been detected.
+        """
+        self._results.pop(image_path, None)
+        self._prompts.pop(image_path, None)
+        self._rejected_indices.pop(image_path, None)
 
     def prompt_change_of(self, image_path: Path, current: PromptSignature) -> PromptChange | None:
         """
@@ -162,3 +275,4 @@ class DetectionCatalog:
         """
         self._results.clear()
         self._prompts.clear()
+        self._rejected_indices.clear()

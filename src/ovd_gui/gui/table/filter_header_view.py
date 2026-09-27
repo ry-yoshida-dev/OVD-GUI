@@ -5,10 +5,11 @@ from PySide6.QtWidgets import QHeaderView, QStyle, QWidget
 
 class FilterHeaderView(QHeaderView):
     """
-    Horizontal header whose sections open a column filter from the funnel icon at their left edge.
+    Horizontal header whose sections open their column filter on a right-click.
 
-    Clicking the funnel, or right-clicking anywhere on a section, asks for the filter of that column; clicking the
-    rest of a section sorts as usual. The funnel is the decoration of the header, supplied by the model.
+    Right-clicking a section, or clicking the funnel icon a filtered column carries at its left edge, asks for the
+    filter of that column; clicking the rest of a section sorts as usual. The funnel is the decoration of the header,
+    supplied by the model for filtered columns only.
 
     Signals
     -------
@@ -72,6 +73,11 @@ class FilterHeaderView(QHeaderView):
         super().mouseReleaseEvent(e)
 
     def _is_on_funnel(self, logical_index: int, position: QPoint) -> bool:
+        funnel: object = self.model().headerData(
+            logical_index, Qt.Orientation.Horizontal, Qt.ItemDataRole.DecorationRole
+        )
+        if funnel is None:
+            return False
         margin: int = self.style().pixelMetric(QStyle.PixelMetric.PM_HeaderMargin, None, self)
         grip_margin: int = self.style().pixelMetric(QStyle.PixelMetric.PM_HeaderGripMargin, None, self)
         icon_size: int = self.style().pixelMetric(QStyle.PixelMetric.PM_SmallIconSize, None, self)

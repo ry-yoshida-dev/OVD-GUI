@@ -3,7 +3,7 @@ import json
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import ClassVar, cast
+from typing import ClassVar
 
 from PIL import Image
 
@@ -11,8 +11,7 @@ from ..detection import ReferenceBox, ReferenceImage
 from ..vocabulary import ClassDefinition
 from .class_set import ClassSet
 from .class_set_summary import ClassSetSummary
-
-type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
+from .json_fields import JsonFields, JsonValue
 
 
 class ClassSetArchive:
@@ -121,8 +120,8 @@ class ClassSetArchive:
     def _read_with[T](self, reader: Callable[[zipfile.ZipFile, dict[str, JsonValue]], T]) -> T:
         try:
             with zipfile.ZipFile(self._path) as archive:
-                manifest: dict[str, JsonValue] = self._object_of(
-                    self._parse(archive.read(self.MANIFEST_NAME).decode("utf-8")), "manifest"
+                manifest: dict[str, JsonValue] = JsonFields.object_of(
+                    JsonFields.parse(archive.read(self.MANIFEST_NAME).decode("utf-8")), "manifest"
                 )
                 self._require_format(manifest)
                 return reader(archive, manifest)
@@ -139,30 +138,30 @@ class ClassSetArchive:
 
     def _summary_from(self, archive: zipfile.ZipFile, manifest: dict[str, JsonValue]) -> ClassSetSummary:
         classes: tuple[ClassDefinition, ...] = tuple(
-            self._class_of(self._object_of(entry, "class"))
-            for entry in self._list_of(manifest.get("classes"), "classes")
+            self._class_of(JsonFields.object_of(entry, "class"))
+            for entry in JsonFields.list_of(manifest.get("classes"), "classes")
         )
         return ClassSetSummary(
             class_names=tuple(definition.name for definition in classes),
             phrase_count=sum(len(definition.text_queries) for definition in classes),
-            reference_image_count=len(self._list_of(manifest.get("reference_images"), "reference_images")),
+            reference_image_count=len(JsonFields.list_of(manifest.get("reference_images"), "reference_images")),
         )
 
     def _class_set_from(self, archive: zipfile.ZipFile, manifest: dict[str, JsonValue]) -> ClassSet:
         reference_images: list[ReferenceImage] = []
         reference_pixels: dict[ReferenceImage, Image.Image] = {}
-        for entry in self._list_of(manifest.get("reference_images"), "reference_images"):
-            reference_image, pixels = self._read_image(archive, self._object_of(entry, "reference image"))
+        for entry in JsonFields.list_of(manifest.get("reference_images"), "reference_images"):
+            reference_image, pixels = self._read_image(archive, JsonFields.object_of(entry, "reference image"))
             reference_images.append(reference_image)
             reference_pixels[reference_image] = pixels
         return ClassSet(
             classes=tuple(
-                self._class_of(self._object_of(entry, "class"))
-                for entry in self._list_of(manifest.get("classes"), "classes")
+                self._class_of(JsonFields.object_of(entry, "class"))
+                for entry in JsonFields.list_of(manifest.get("classes"), "classes")
             ),
             reference_boxes=tuple(
-                self._box_of(self._object_of(entry, "reference box"), reference_images)
-                for entry in self._list_of(manifest.get("reference_boxes"), "reference_boxes")
+                self._box_of(JsonFields.object_of(entry, "reference box"), reference_images)
+                for entry in JsonFields.list_of(manifest.get("reference_boxes"), "reference_boxes")
             ),
             reference_pixels=reference_pixels,
         )
@@ -229,10 +228,12 @@ class ClassSetArchive:
 
     def _read_image(self, archive: zipfile.ZipFile, entry: dict[str, JsonValue]) -> tuple[ReferenceImage, Image.Image]:
         reference_image: ReferenceImage = ReferenceImage(
-            name=self._string_of(entry.get("name"), "reference image name"),
-            digest=self._string_of(entry.get("digest"), "reference image digest"),
+            name=JsonFields.string_of(entry.get("name"), "reference image name"),
+            digest=JsonFields.string_of(entry.get("digest"), "reference image digest"),
         )
-        with Image.open(io.BytesIO(archive.read(self._string_of(entry.get("file"), "reference image file")))) as source:
+        with Image.open(
+            io.BytesIO(archive.read(JsonFields.string_of(entry.get("file"), "reference image file")))
+        ) as source:
             pixels: Image.Image = source.convert("RGB")
         if ReferenceImage.digest_of(pixels) != reference_image.digest:
             raise ValueError(f"Pixels of the reference image '{reference_image.name}' do not match their digest.")
@@ -240,9 +241,9 @@ class ClassSetArchive:
 
     def _class_of(self, entry: dict[str, JsonValue]) -> ClassDefinition:
         return ClassDefinition(
-            name=self._string_of(entry.get("name"), "class name"),
+            name=JsonFields.string_of(entry.get("name"), "class name"),
             text_queries=tuple(
-                self._string_of(phrase, "phrase") for phrase in self._list_of(entry.get("phrases"), "phrases")
+                JsonFields.string_of(phrase, "phrase") for phrase in JsonFields.list_of(entry.get("phrases"), "phrases")
             ),
         )
 
@@ -254,13 +255,16 @@ class ClassSetArchive:
             or not (0 <= image_index < len(reference_images))
         ):
             raise ValueError(f"Reference box image must index reference_images. got {image_index!r}")
-        corners: list[float] = [self._number_of(corner) for corner in self._list_of(entry.get("xyxy"), "xyxy")]
+        corners: list[float] = [
+            JsonFields.number_of(corner, "reference box corner")
+            for corner in JsonFields.list_of(entry.get("xyxy"), "xyxy")
+        ]
         if len(corners) != 4:
             raise ValueError(f"Reference box xyxy must hold 4 numbers. got {corners}")
         left, top, right, bottom = corners
         return ReferenceBox(
             reference_image=reference_images[image_index],
-            class_name=self._string_of(entry.get("class_name"), "reference box class_name"),
+            class_name=JsonFields.string_of(entry.get("class_name"), "reference box class_name"),
             left=left,
             top=top,
             right=right,
@@ -275,31 +279,3 @@ class ClassSetArchive:
         buffer: io.BytesIO = io.BytesIO()
         image.save(buffer, format="PNG")
         return buffer.getvalue()
-
-    @staticmethod
-    def _object_of(value: JsonValue, description: str) -> dict[str, JsonValue]:
-        if not isinstance(value, dict):
-            raise TypeError(f"{description} must be a JSON object. got {type(value).__name__}")
-        return value
-
-    @staticmethod
-    def _list_of(value: JsonValue, description: str) -> list[JsonValue]:
-        if not isinstance(value, list):
-            raise TypeError(f"{description} must be a JSON array. got {type(value).__name__}")
-        return value
-
-    @staticmethod
-    def _string_of(value: JsonValue, description: str) -> str:
-        if not isinstance(value, str):
-            raise TypeError(f"{description} must be a string. got {type(value).__name__}")
-        return value
-
-    @staticmethod
-    def _number_of(value: JsonValue) -> float:
-        if isinstance(value, bool) or not isinstance(value, int | float):
-            raise TypeError(f"Box corners must be numbers. got {value!r}")
-        return float(value)
-
-    @staticmethod
-    def _parse(text: str) -> JsonValue:
-        return cast(JsonValue, json.loads(text))

@@ -21,9 +21,10 @@ class SettingsPanel(QWidget):
     Model selection from presets, with per-run overrides of device, precision and thresholds.
 
     Choosing a preset loads its ``DetectorSettings`` and fills every override with the preset values;
-    ``current_settings`` returns the preset settings with the overrides applied. float16 can be chosen only while the
-    selected device resolves to a GPU available on this machine; otherwise it is unchecked and disabled. Devices
-    missing on this machine are listed disabled, and a preset asking for one falls back to ``Device.AUTO``.
+    ``current_settings`` returns the preset settings with the overrides applied. A preset is always selected, since a
+    ``PresetCatalog`` holds at least one. float16 can be chosen only while the selected device resolves to a GPU
+    available on this machine; otherwise it is unchecked and disabled. Devices missing on this machine are listed
+    disabled, and a preset asking for one falls back to ``Device.AUTO``.
 
     Signals
     -------
@@ -56,8 +57,8 @@ class SettingsPanel(QWidget):
         self._catalog: PresetCatalog = catalog
         self._device_availability: DeviceAvailability = device_availability
         self._backends: tuple[DetectorBackend, ...] = catalog.backends
-        self._presets: tuple[ModelPreset, ...] = ()
-        self._preset_settings: DetectorSettings | None = None
+        self._presets: tuple[ModelPreset, ...] = catalog.presets_of(self._backends[0])
+        self._preset_settings: DetectorSettings = self._presets[0].load_settings()
 
         self._backend_combo: QComboBox = QComboBox()
         self._backend_combo.addItems([backend.value for backend in self._backends])
@@ -133,20 +134,13 @@ class SettingsPanel(QWidget):
         """
         Settings of the chosen preset with the overrides of the panel applied.
 
+        The threshold spin boxes are limited to [0, 1], so the overrides always make valid settings.
+
         Returns
         -------
         DetectorSettings
             Settings to detect with.
-
-        Raises
-        ------
-        RuntimeError
-            If no preset is loaded.
-        ValueError
-            If an override is invalid.
         """
-        if self._preset_settings is None:
-            raise RuntimeError("no preset is loaded")
         return replace(
             self._preset_settings,
             device=self._devices[self._device_combo.currentIndex()],

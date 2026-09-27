@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 
-from open_vocabulary_detector import DetectionResult
+from open_vocabulary_detector import Detection
 from PIL import Image
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPen, QPixmap, QResizeEvent, QWheelEvent
@@ -10,7 +10,10 @@ from ...detection import ReferenceBox
 from ..class_palette import ClassPalette
 from .box_grab import BoxGrab
 from .box_grab_kind import BoxGrabKind
+from .box_style import BoxStyle
 from .detection_box_item import DetectionBoxItem
+from .detection_overlay import DetectionOverlay
+from .display_options import DisplayOptions
 from .reference_box_item import ReferenceBoxItem
 
 
@@ -18,7 +21,9 @@ class ImageCanvas(QGraphicsView):
     """
     Zoomable view of an image with detection and reference boxes drawn over it.
 
-    The image fits the view until the user zooms with the mouse wheel; double-click fits it again.
+    The image fits the view until the user zooms with the mouse wheel; double-click fits it again. Only the detections
+    listed in the detection table are drawn: kept ones solid, rejected ones dashed and faded, and those of a compared
+    model dotted; ``DisplayOptions`` choose labels, confidences, line width and fill.
     While drawing is enabled, dragging with the left button draws a rectangle instead of panning, and the reference
     boxes become editable: dragging a round corner handle resizes a box and dragging inside a box moves it.
 
@@ -52,7 +57,11 @@ class ImageCanvas(QGraphicsView):
         self._palette: ClassPalette = palette
         self._scene: QGraphicsScene = QGraphicsScene(self)
         self._pixmap_item: QGraphicsPixmapItem | None = None
-        self._box_items: list[DetectionBoxItem] = []
+        self._box_items: dict[int, DetectionBoxItem] = {}
+        self._comparison_items: list[DetectionBoxItem] = []
+        self._overlay: DetectionOverlay | None = None
+        self._options: DisplayOptions = DisplayOptions()
+        self._highlighted_index: int | None = None
         self._reference_items: list[ReferenceBoxItem] = []
         self._reference_box_indices: list[int] = []
         self._shown_references: tuple[ReferenceBox, ...] = ()
@@ -80,7 +89,10 @@ class ImageCanvas(QGraphicsView):
             RGB image to show.
         """
         self._scene.clear()
-        self._box_items = []
+        self._box_items = {}
+        self._comparison_items = []
+        self._overlay = None
+        self._highlighted_index = None
         self._reference_items = []
         self._reference_box_indices = []
         self._shown_references = ()
@@ -90,28 +102,74 @@ class ImageCanvas(QGraphicsView):
         self._scene.setSceneRect(self._pixmap_item.boundingRect())
         self.fit_to_view()
 
-    def show_result(self, result: DetectionResult) -> None:
+    @property
+    def display_options(self) -> DisplayOptions:
         """
-        Replace the drawn boxes with the detections of ``result``.
+        How detection boxes are drawn.
+
+        Returns
+        -------
+        DisplayOptions
+            Options in effect.
+        """
+        return self._options
+
+    @property
+    def drawn_indices(self) -> tuple[int, ...]:
+        """
+        Detections of the shown result drawn now.
+
+        Returns
+        -------
+        tuple[int, ...]
+            Indices in the shown result, in ascending order.
+        """
+        return tuple(sorted(self._box_items))
+
+    @property
+    def drawn_comparison_count(self) -> int:
+        """
+        Boxes of the compared model drawn now.
+
+        Returns
+        -------
+        int
+            Number of dotted boxes.
+        """
+        return len(self._comparison_items)
+
+    def set_display_options(self, options: DisplayOptions) -> None:
+        """
+        Draw the boxes again with other options.
 
         Parameters
         ----------
-        result : DetectionResult
-            Detections in the shown image's pixel coordinates.
+        options : DisplayOptions
+            New options.
         """
-        self.clear_detections()
-        for detection in result:
-            box_item: DetectionBoxItem = DetectionBoxItem(detection, self._palette.color_of(detection.class_id))
-            self._scene.addItem(box_item)
-            self._box_items.append(box_item)
+        self._options = options
+        self._redraw_detections()
+
+    def show_overlay(self, overlay: DetectionOverlay) -> None:
+        """
+        Replace the drawn detection boxes.
+
+        Parameters
+        ----------
+        overlay : DetectionOverlay
+            Detections in the shown image's pixel coordinates, with the listed and rejected ones and those of a
+            compared model; the highlighted detection stays highlighted while it is drawn.
+        """
+        self._overlay = overlay
+        self._redraw_detections()
 
     def clear_detections(self) -> None:
         """
         Remove every detection box.
         """
-        for box_item in self._box_items:
-            self._scene.removeItem(box_item)
-        self._box_items = []
+        self._overlay = None
+        self._highlighted_index = None
+        self._redraw_detections()
 
     def show_references(self, boxes: Sequence[ReferenceBox], class_names: tuple[str, ...]) -> None:
         """
@@ -168,9 +226,10 @@ class ImageCanvas(QGraphicsView):
         detection_index : int | None
             Index of the detection in the shown result; ``None`` clears the emphasis.
         """
-        for index, box_item in enumerate(self._box_items):
+        self._highlighted_index = detection_index
+        for index, box_item in self._box_items.items():
             box_item.set_highlighted(index == detection_index)
-        if detection_index is not None and 0 <= detection_index < len(self._box_items):
+        if detection_index is not None and detection_index in self._box_items:
             self.ensureVisible(self._box_items[detection_index])
 
     def fit_to_view(self) -> None:
@@ -233,6 +292,36 @@ class ImageCanvas(QGraphicsView):
         self._discard_rubber_band()
         if min(rectangle.width(), rectangle.height()) >= self.MINIMUM_RECTANGLE_SIZE:
             self.rectangle_drawn.emit(rectangle)
+
+    def _redraw_detections(self) -> None:
+        for drawn_item in (*self._box_items.values(), *self._comparison_items):
+            self._scene.removeItem(drawn_item)
+        self._box_items = {}
+        self._comparison_items = []
+        overlay: DetectionOverlay | None = self._overlay
+        if overlay is None:
+            return
+        for index, detection in enumerate(overlay.result):
+            is_rejected: bool = index in overlay.rejected_indices
+            if index not in overlay.listed_indices or (is_rejected and not self._options.is_rejected_shown):
+                continue
+            box_item: DetectionBoxItem = self._box_item_of(
+                detection, BoxStyle.REJECTED if is_rejected else BoxStyle.KEPT, ""
+            )
+            box_item.set_highlighted(index == self._highlighted_index)
+            self._box_items[index] = box_item
+        if overlay.comparison is not None and self._options.is_comparison_shown:
+            self._comparison_items = [
+                self._box_item_of(detection, BoxStyle.COMPARED, overlay.comparison_name)
+                for detection in overlay.comparison
+            ]
+
+    def _box_item_of(self, detection: Detection, style: BoxStyle, label_prefix: str) -> DetectionBoxItem:
+        box_item: DetectionBoxItem = DetectionBoxItem(
+            detection, self._palette.color_of(detection.class_id), style, self._options, label_prefix
+        )
+        self._scene.addItem(box_item)
+        return box_item
 
     @staticmethod
     def _to_qimage(image: Image.Image) -> QImage:

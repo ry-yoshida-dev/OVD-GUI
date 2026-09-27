@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pytest
 from open_vocabulary_detector import DetectionThresholds, DetectorBackend, DetectorSettings, Device
-from PySide6.QtWidgets import QApplication, QPushButton, QTreeWidget, QTreeWidgetItem
+from PySide6.QtWidgets import QApplication, QHeaderView, QPushButton, QTreeWidget, QTreeWidgetItem
 
 from ovd_gui.detection import DetectorProfile, ProfileSummary
 from ovd_gui.gui.table import ProfileColumn, ProfilePanel
@@ -88,3 +88,10 @@ def test_unlisted_profiles_are_rejected(panel: ProfilePanel) -> None:
         panel.set_summaries(
             (ProfileSummary(profile=SMALL, image_count=0, outdated_image_count=0, detection_count=0),), LARGE
         )
+
+
+def test_model_table_columns_can_be_resized(application: QApplication) -> None:
+    panel: ProfilePanel = ProfilePanel()
+    tree: QTreeWidget | None = panel.findChild(QTreeWidget)
+    assert tree is not None
+    assert tree.header().sectionResizeMode(0) == QHeaderView.ResizeMode.Interactive

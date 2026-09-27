@@ -5,7 +5,6 @@ from PySide6.QtGui import QAction, QFont, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QMenu,
     QPushButton,
@@ -16,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...detection import DetectorProfile, ProfileSummary
+from .column_auto_fit import ColumnAutoFit
 from .outdated_icon import OutdatedIcon
 from .profile_column import ProfileColumn
 
@@ -26,7 +26,7 @@ class ProfilePanel(QWidget):
 
     The selected row is the profile whose results the window shows; selecting another row switches to its results
     without detecting again. ``Outdated`` counts the images of a profile detected with other classes, phrases or
-    reference boxes than the current ones. The selected profile can be removed with the Remove button, the Delete key or the
+    reference boxes than the current ones. Columns fit their contents until the user drags a column edge. The selected profile can be removed with the Remove button, the Delete key or the
     right-click menu.
 
     Signals
@@ -59,6 +59,10 @@ class ProfilePanel(QWidget):
         self._remove_action: QAction = QAction("Remove Results", self)
         self._remove_action.setShortcut(QKeySequence.StandardKey.Delete)
         self._remove_action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._column_auto_fit: ColumnAutoFit = ColumnAutoFit(
+            self._tree.header(),
+            lambda column: max(self._tree.sizeHintForColumn(column), self._tree.header().sectionSizeHint(column)),
+        )
         self._build_tree()
         self._build_layout()
         self._connect_signals()
@@ -138,6 +142,7 @@ class ProfilePanel(QWidget):
         if shown_profile is not None:
             self._tree.setCurrentItem(items[profiles.index(shown_profile)])
         self._tree.blockSignals(False)
+        self._column_auto_fit.fit()
         self._update_controls()
 
     def _build_tree(self) -> None:
@@ -149,10 +154,6 @@ class ProfilePanel(QWidget):
         self._tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.addAction(self._remove_action)
-        header: QHeaderView = self._tree.header()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(ProfileColumn.OPTIONS.value, QHeaderView.ResizeMode.Stretch)
-        header.setStretchLastSection(False)
 
     def _build_layout(self) -> None:
         title_label: QLabel = QLabel(self.TITLE)

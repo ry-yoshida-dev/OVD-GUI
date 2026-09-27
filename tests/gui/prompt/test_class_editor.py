@@ -433,7 +433,7 @@ def test_edits_are_marked_and_confirmed_before_switching_sets(
     assert combo.currentText() == "vehicles"
     monkeypatch.setattr(QMessageBox, "question", lambda *arguments: QMessageBox.StandardButton.Discard)
     combo.activated.emit(0)
-    assert editor.class_names == ("cat",)
+    assert list(editor.class_names) == ["cat"]
 
 
 def test_classes_from_a_file_are_not_tied_to_a_set(editor: ClassEditor, tmp_path: Path) -> None:

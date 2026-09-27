@@ -1,10 +1,12 @@
+import csv
 from pathlib import Path
 
 import numpy as np
 import pytest
 from open_vocabulary_detector import DetectionResult, ImageSize, Prompt, PromptKind
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTableView
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QApplication, QHeaderView, QLabel, QMenu, QPushButton, QTableView, QToolButton
 
 from ovd_gui.detection import DetectionCatalog, DetectionRecord, LabeledPrompt, PromptChange, ReferenceBoard
 from ovd_gui.gui.class_palette import ClassPalette
@@ -20,6 +22,7 @@ from ovd_gui.gui.table import (
     ValueChecklist,
     ValueCondition,
 )
+from ovd_gui.review import ClassThresholds
 from ovd_gui.vocabulary import ClassDefinition
 
 CAT_DOG_PROMPT: LabeledPrompt = ReferenceBoard().build_prompt(
@@ -145,19 +148,35 @@ def test_condition_kind_must_suit_the_column(panel: ResultPanel) -> None:
         RangeCondition(0.8, 0.2)
 
 
-def test_header_funnel_shows_which_columns_are_filtered(panel: ResultPanel) -> None:
+def test_only_filtered_headers_carry_a_funnel(panel: ResultPanel) -> None:
     model = _table_view(panel).model()
-    unfiltered_icon = model.headerData(
-        ResultColumn.CLASS.value, Qt.Orientation.Horizontal, Qt.ItemDataRole.DecorationRole
-    )
-    assert unfiltered_icon is not None
+    assert model.headerData(ResultColumn.CLASS.value, Qt.Orientation.Horizontal, Qt.ItemDataRole.DecorationRole) is None
     _filter_classes(panel, "dog")
     tooltip = model.headerData(ResultColumn.CLASS.value, Qt.Orientation.Horizontal, Qt.ItemDataRole.ToolTipRole)
     assert tooltip == "Class: dog"
-    filtered_icon = model.headerData(
-        ResultColumn.CLASS.value, Qt.Orientation.Horizontal, Qt.ItemDataRole.DecorationRole
+    assert (
+        model.headerData(ResultColumn.CLASS.value, Qt.Orientation.Horizontal, Qt.ItemDataRole.DecorationRole)
+        is not None
     )
-    assert filtered_icon is not unfiltered_icon
+    assert model.headerData(ResultColumn.QUERY.value, Qt.Orientation.Horizontal, Qt.ItemDataRole.DecorationRole) is None
+
+
+def test_one_filter_button_lists_every_column(panel: ResultPanel) -> None:
+    _filter_classes(panel, "dog")
+    button: QToolButton | None = panel.findChild(QToolButton)
+    assert button is not None
+    menu: QMenu | None = button.menu()
+    assert menu is not None
+    panel._fill_filter_menu()
+    column_actions: list[QAction] = [action for action in menu.actions() if action.isCheckable()]
+    assert len(column_actions) == len(ResultColumn)
+    assert [action.isChecked() for action in column_actions] == [
+        column == ResultColumn.CLASS for column in ResultColumn
+    ]
+    column_actions[ResultColumn.QUERY.value].trigger()
+    popup: ColumnFilterPopup | None = panel.findChild(ColumnFilterPopup)
+    assert popup is not None
+    popup.close()
 
 
 def test_header_asks_for_the_filter_of_a_column(panel: ResultPanel) -> None:
@@ -190,8 +209,10 @@ def test_value_popup_checks_values_of_the_rows_passing_other_filters(panel: Resu
     popup.apply()
     assert panel.table_filter.condition_of(ResultColumn.QUERY) == ValueCondition(frozenset())
     assert _listed(panel) == []
+    reopened_editor = panel.open_filter_popup(ResultColumn.QUERY, QPoint(0, 0)).editor
+    assert isinstance(reopened_editor, ValueChecklist)
     with pytest.raises(KeyError):
-        panel.open_filter_popup(ResultColumn.QUERY, QPoint(0, 0)).editor.set_text_checked("cat", True)
+        reopened_editor.set_text_checked("cat", True)
 
 
 def test_class_popup_offers_image_states(panel: ResultPanel) -> None:
@@ -342,3 +363,117 @@ def test_outdated_images_are_marked_and_can_be_updated(panel: ResultPanel) -> No
     panel.set_prompt_changes({})
     assert not panel.outdated_image_paths
     assert update_button.isHidden()
+
+
+def _catalog_panel() -> tuple[ResultPanel, DetectionCatalog]:
+    result_panel: ResultPanel = ResultPanel(ClassPalette())
+    result_panel.add_images([Path("a.jpg"), Path("b.jpg")])
+    catalog: DetectionCatalog = DetectionCatalog()
+    for image_name, class_ids, confidences in (("a.jpg", [0, 1], [0.3, 0.9]), ("b.jpg", [1], [0.6])):
+        catalog.record(
+            Path(image_name),
+            DetectionResult.from_xyxy(
+                xyxy=np.tile(np.array([0.0, 0.0, 10.0, 10.0]), (len(class_ids), 1)),
+                confidences=np.array(confidences, dtype=np.float64),
+                query_ids=np.array(class_ids, dtype=np.int64),
+                prompt=Prompt.from_class_names(("cat", "dog")),
+                image_size=ImageSize(width=100, height=50),
+            ),
+            CAT_DOG_PROMPT,
+        )
+    result_panel.show_catalog(catalog)
+    return result_panel, catalog
+
+
+def test_unchecking_keep_rejects_the_detection_in_the_catalog(application: QApplication) -> None:
+    result_panel, catalog = _catalog_panel()
+    changed_images: list[Path] = []
+    result_panel.acceptance_changed.connect(changed_images.append)
+    table_view: QTableView = _table_view(result_panel)
+    keep_index = table_view.model().index(0, ResultColumn.ACCEPTED.value)
+    assert keep_index.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked
+    assert table_view.model().setData(keep_index, Qt.CheckState.Unchecked.value, Qt.ItemDataRole.CheckStateRole)
+    assert catalog.rejected_indices_of(Path("a.jpg")) == frozenset({0})
+    assert keep_index.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Unchecked
+    assert changed_images == [Path("a.jpg")]
+    summary: QLabel | None = result_panel.findChild(QLabel)
+    assert summary is not None and "1 rejected" in summary.text()
+
+
+def test_space_toggles_the_selected_detection_and_the_menu_rejects_every_listed_one(
+    application: QApplication,
+) -> None:
+    result_panel, catalog = _catalog_panel()
+    table_view: QTableView = _table_view(result_panel)
+    table_view.selectRow(1)
+    record: DetectionRecord | None = result_panel.selected_record
+    assert record is not None
+    result_panel._toggle_selected()
+    assert not result_panel.is_accepted(record)
+    result_panel._toggle_selected()
+    assert result_panel.is_accepted(record)
+
+    result_panel.set_column_filter(ResultColumn.CONFIDENCE, RangeCondition(None, 0.7))
+    result_panel.set_listed_accepted(False)
+    assert catalog.rejected_indices_of(Path("a.jpg")) == frozenset({0})
+    assert catalog.rejected_indices_of(Path("b.jpg")) == frozenset({0})
+
+    result_panel.clear_filters()
+    result_panel.set_column_filter(ResultColumn.ACCEPTED, ValueCondition(frozenset({"Rejected"})))
+    assert _listed(result_panel) == [("a.jpg", "cat", 0.3), ("b.jpg", "dog", 0.6)]
+
+
+def test_listed_detections_are_saved_as_csv_in_display_order(application: QApplication, tmp_path: Path) -> None:
+    result_panel, _ = _catalog_panel()
+    result_panel.set_accepted((result_panel.visible_records[0],), False)
+    result_panel.set_column_filter(ResultColumn.CONFIDENCE, RangeCondition(0.5, None))
+    _table_view(result_panel).sortByColumn(ResultColumn.CONFIDENCE.value, Qt.SortOrder.AscendingOrder)
+    table_path: Path = tmp_path / "table.csv"
+    assert result_panel.save_listed_table(table_path) == 2
+    with table_path.open(encoding="utf-8", newline="") as table_file:
+        rows: list[list[str]] = list(csv.reader(table_file))
+    assert rows[0] == ["image", "class", "prompt", "confidence", "x1", "y1", "x2", "y2", "kept"]
+    assert [(row[0], row[1], float(row[3]), row[8]) for row in rows[1:]] == [
+        ("b.jpg", "dog", 0.6, "true"),
+        ("a.jpg", "dog", 0.9, "true"),
+    ]
+
+    result_panel.clear_filters()
+    assert result_panel.save_listed_table(table_path) == 3
+    with table_path.open(encoding="utf-8", newline="") as table_file:
+        assert [row[8] for row in csv.reader(table_file)][1:] == ["false", "true", "true"]
+
+
+def test_saving_the_table_needs_listed_results(panel: ResultPanel, tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError):
+        panel.save_listed_table(tmp_path / "table.csv")
+
+
+def test_class_minimums_hide_detections_below_them(application: QApplication) -> None:
+    result_panel, _ = _catalog_panel()
+    listing_changes: list[None] = []
+    result_panel.listing_changed.connect(lambda: listing_changes.append(None))
+    result_panel.set_class_thresholds(ClassThresholds(0.0, {"dog": 0.7}))
+    assert _listed(result_panel) == [("a.jpg", "cat", 0.3), ("a.jpg", "dog", 0.9)]
+    assert result_panel.listed_detection_indices(Path("a.jpg")) == frozenset({0, 1})
+    assert result_panel.listed_detection_indices_by_image() == {Path("a.jpg"): frozenset({0, 1})}
+    assert listing_changes
+    summary: QLabel | None = result_panel.findChild(QLabel)
+    assert summary is not None and "1 below class minimums" in summary.text()
+
+
+def test_removed_images_are_no_longer_listed(application: QApplication) -> None:
+    result_panel, _ = _catalog_panel()
+    result_panel.set_current_image(Path("a.jpg"))
+    result_panel.remove_images([Path("a.jpg"), Path("missing.jpg")])
+    assert _listed(result_panel) == [("b.jpg", "dog", 0.6)]
+    assert not any(result_panel.is_current(row) for row in result_panel.visible_rows)
+
+
+def test_columns_fit_their_contents_until_the_user_resizes_one(application: QApplication) -> None:
+    result_panel, _ = _catalog_panel()
+    header = _table_view(result_panel).horizontalHeader()
+    assert header.sectionResizeMode(ResultColumn.IMAGE.value) == QHeaderView.ResizeMode.Interactive
+    header.resizeSection(ResultColumn.IMAGE.value, 333)
+    result_panel.add_images([Path("a_much_longer_image_name_than_before.jpg")])
+    assert header.sectionSize(ResultColumn.IMAGE.value) == 333

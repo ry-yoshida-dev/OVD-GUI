@@ -78,3 +78,44 @@ def test_images_detected_with_other_classes_are_outdated() -> None:
         for image_path in (Path("a.jpg"), Path("b.jpg"))
     }
     assert catalog.prompt_change_of(Path("missing.jpg"), edited.signature) is None
+
+
+def test_rejected_detections_stay_stored_until_the_image_is_recorded_again() -> None:
+    catalog: DetectionCatalog = DetectionCatalog()
+    records: tuple[DetectionRecord, ...] = catalog.record(
+        Path("a.jpg"), _result([[0, 0, 10, 10], [5, 6, 20, 30]], [0, 2], [0.9, 0.4]), LABELED_PROMPT
+    )
+    assert all(catalog.is_accepted(record) for record in records)
+
+    catalog.set_accepted(Path("a.jpg"), (1,), is_accepted=False)
+    assert [catalog.is_accepted(record) for record in catalog.records_of(Path("a.jpg"))] == [True, False]
+    assert catalog.rejected_indices_of(Path("a.jpg")) == frozenset({1})
+
+    catalog.set_accepted(Path("a.jpg"), (1,), is_accepted=True)
+    assert catalog.rejected_indices_of(Path("a.jpg")) == frozenset()
+
+    catalog.set_accepted(Path("a.jpg"), (0, 1), is_accepted=False)
+    catalog.record(Path("a.jpg"), _result([[0, 0, 10, 10]], [0], [0.9]), LABELED_PROMPT)
+    assert catalog.rejected_indices_of(Path("a.jpg")) == frozenset()
+
+
+def test_accepting_detections_of_unknown_images_or_indices_fails() -> None:
+    catalog: DetectionCatalog = DetectionCatalog()
+    catalog.record(Path("a.jpg"), _result([[0, 0, 10, 10]], [0], [0.9]), LABELED_PROMPT)
+    with pytest.raises(KeyError):
+        catalog.set_accepted(Path("b.jpg"), (0,), is_accepted=False)
+    with pytest.raises(IndexError):
+        catalog.set_accepted(Path("a.jpg"), (0, 1), is_accepted=False)
+    assert catalog.rejected_indices_of(Path("a.jpg")) == frozenset()
+
+
+def test_removing_an_image_forgets_its_result_prompt_and_rejections() -> None:
+    catalog: DetectionCatalog = DetectionCatalog()
+    catalog.record(Path("a.jpg"), _result([[0, 0, 10, 10]], [0], [0.9]), LABELED_PROMPT)
+    catalog.record(Path("b.jpg"), _result([[0, 0, 10, 10]], [0], [0.9]), LABELED_PROMPT)
+    catalog.set_accepted(Path("a.jpg"), (0,), is_accepted=False)
+    catalog.remove(Path("a.jpg"))
+    assert catalog.image_paths == (Path("b.jpg"),)
+    assert catalog.labeled_prompt_of(Path("a.jpg")) is None
+    assert catalog.labeled_prompt_of(Path("b.jpg")) is LABELED_PROMPT
+    assert catalog.rejected_indices_of(Path("a.jpg")) == frozenset()

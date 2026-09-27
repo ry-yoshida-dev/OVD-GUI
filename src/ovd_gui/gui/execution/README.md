@@ -14,7 +14,7 @@ its progress and Cancel button in the status bar.
 | Component | Description |
 | --------- | ----------- |
 | [detection_runner.py](./detection_runner.py) | `DetectionRunner`: queues foreground single and batch detections and yielding background detections to the worker thread, and tracks the busy state and running batch. |
-| [detection_worker.py](./detection_worker.py) | `DetectionWorker`: runs `DetectorSession` on the worker thread for one image or a cancellable, reorderable batch, and reports results or errors. |
+| [detection_worker.py](./detection_worker.py) | `DetectionWorker`: reads image files and runs `DetectorSession` on the worker thread for one image or a cancellable, reorderable batch; every request ends with a result or a reported error, whatever is raised. |
 | [batch_job.py](./batch_job.py) | `BatchJob`: batch request with its purpose, and the export options of an export. |
 | [batch_purpose.py](./batch_purpose.py) | `BatchPurpose`: whether a batch detection serves Detect All or an export, and whether it blocks the window. |
 | [batch_progress_dialog.py](./batch_progress_dialog.py) | `BatchProgressDialog`: window-modal, cancellable progress of a blocking batch. |

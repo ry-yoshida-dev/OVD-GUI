@@ -6,6 +6,7 @@ from PySide6.QtCore import QObject, QThread, Signal
 from ...detection import (
     BatchDetectionRequest,
     BatchDetectionSummary,
+    DetectionFailure,
     DetectionOutcome,
     DetectionRequest,
     DetectorProfile,
@@ -38,12 +39,12 @@ class DetectionRunner(QObject):
         Progress message of the worker.
     succeeded : Signal(DetectionOutcome)
         A single foreground detection finished.
-    failed : Signal(str)
-        Error message of a failed single foreground detection.
+    failed : Signal(DetectionFailure)
+        Why a single foreground detection failed.
     background_succeeded : Signal(DetectionOutcome)
         A background detection finished.
-    background_failed : Signal(DetectionRequest, str)
-        A background detection failed, with the error message.
+    background_failed : Signal(DetectionRequest, DetectionFailure)
+        A background detection failed, with why it failed.
     batch_started : Signal(BatchJob)
         A batch was requested.
     batch_progressed : Signal(BatchJob, int, int)
@@ -59,9 +60,9 @@ class DetectionRunner(QObject):
     busy_changed: Signal = Signal(bool)
     status_changed: Signal = Signal(str)
     succeeded: Signal = Signal(DetectionOutcome)
-    failed: Signal = Signal(str)
+    failed: Signal = Signal(DetectionFailure)
     background_succeeded: Signal = Signal(DetectionOutcome)
-    background_failed: Signal = Signal(DetectionRequest, str)
+    background_failed: Signal = Signal(DetectionRequest, DetectionFailure)
     batch_started: Signal = Signal(BatchJob)
     batch_progressed: Signal = Signal(BatchJob, int, int)
     batch_image_detected: Signal = Signal(BatchJob, Path, DetectionResult)
@@ -130,7 +131,7 @@ class DetectionRunner(QObject):
         Parameters
         ----------
         request : DetectionRequest
-            Settings, image and prompt.
+            Settings, image file and prompt.
 
         Raises
         ------
@@ -169,7 +170,7 @@ class DetectionRunner(QObject):
         Parameters
         ----------
         request : DetectionRequest
-            Settings, image and prompt.
+            Settings, image file and prompt.
         """
         if self._is_busy:
             return
@@ -275,13 +276,13 @@ class DetectionRunner(QObject):
         self.succeeded.emit(outcome)
         self._set_busy(False)
 
-    def _on_failed(self, message: str) -> None:
+    def _on_failed(self, failure: DetectionFailure) -> None:
         if self._background_request is not None:
             request: DetectionRequest = self._finish_background()
             self._send_waiting_run()
-            self.background_failed.emit(request, message)
+            self.background_failed.emit(request, failure)
             return
-        self.failed.emit(message)
+        self.failed.emit(failure)
         self._set_busy(False)
 
     def _on_batch_progressed(self, processed_count: int, total_count: int) -> None:

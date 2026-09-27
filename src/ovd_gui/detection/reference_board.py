@@ -294,6 +294,35 @@ class ReferenceBoard:
             )
         )
 
+    def prompt_issue(
+        self, definitions: Sequence[ClassDefinition], supported_kinds: frozenset[PromptKind]
+    ) -> str | None:
+        """
+        Why no prompt can be built from the classes, checked before ``build_prompt``.
+
+        Parameters
+        ----------
+        definitions : Sequence[ClassDefinition]
+            Classes to detect.
+        supported_kinds : frozenset[PromptKind]
+            Query kinds the selected model accepts.
+
+        Returns
+        -------
+        str | None
+            Message for the user when there is no class or a class is left without any query the model accepts,
+            ``None`` when a prompt can be built.
+        """
+        if not definitions:
+            return "Add at least one class to detect."
+        is_visual_supported: bool = PromptKind.VISUAL in supported_kinds
+        for definition in definitions:
+            has_references: bool = bool(self.reference_images_of(definition.name))
+            if definition.text_queries or (is_visual_supported and has_references):
+                continue
+            return self._describe_missing_queries(definition.name, has_references=has_references)
+        return None
+
     def build_prompt(
         self, definitions: Sequence[ClassDefinition], supported_kinds: frozenset[PromptKind]
     ) -> LabeledPrompt:
@@ -315,8 +344,11 @@ class ReferenceBoard:
         Raises
         ------
         ValueError
-            If there is no class, or a class is left without any query the model accepts.
+            If ``prompt_issue`` reports an issue.
         """
+        issue: str | None = self.prompt_issue(definitions, supported_kinds)
+        if issue is not None:
+            raise ValueError(issue)
         is_visual_supported: bool = PromptKind.VISUAL in supported_kinds
         class_queries: dict[str, tuple[PromptQuery, ...]] = {}
         query_labels: list[str] = []
@@ -331,11 +363,7 @@ class ReferenceBoard:
                     used_references[signature] = self._reference_for(signature)
                     queries.append(VisualQuery(references=(used_references[signature],)))
                     query_labels.append(reference_image.name)
-            if not queries:
-                raise ValueError(self._describe_missing_queries(definition.name, has_references=bool(reference_images)))
             class_queries[definition.name] = tuple(queries)
-        if not class_queries:
-            raise ValueError("Add at least one class to detect.")
         self._references = used_references
         return LabeledPrompt(
             prompt=Prompt(class_queries),

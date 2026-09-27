@@ -16,7 +16,16 @@ from open_vocabulary_detector import (
 from PIL import Image
 from PySide6.QtWidgets import QApplication
 
-from ovd_gui.detection import BatchDetectionRequest, BatchDetectionSummary, LabeledPrompt, ReferenceBoard
+from ovd_gui.detection import (
+    BatchDetectionRequest,
+    BatchDetectionSummary,
+    DetectionFailure,
+    DetectionFailureKind,
+    DetectionOutcome,
+    DetectionRequest,
+    LabeledPrompt,
+    ReferenceBoard,
+)
 from ovd_gui.gui.execution import DetectionWorker
 from ovd_gui.vocabulary import ClassDefinition
 
@@ -26,6 +35,21 @@ class EmptyResultDetector(OpenVocabularyDetector):
 
     def _detect_mini_batch(self, images: Sequence[Image.Image], prompt: Prompt) -> list[DetectionResult]:
         return [DetectionResult.empty(prompt, ImageSize(width=image.width, height=image.height)) for image in images]
+
+
+class IndexErrorDetector(OpenVocabularyDetector):
+    BACKEND: ClassVar[DetectorBackend] = DetectorBackend.YOLOE
+
+    def _detect_mini_batch(self, images: Sequence[Image.Image], prompt: Prompt) -> list[DetectionResult]:
+        raise IndexError("query index out of range")
+
+
+class RunRecorder:
+    def __init__(self, worker: DetectionWorker) -> None:
+        self.outcomes: list[DetectionOutcome] = []
+        self.failures: list[DetectionFailure] = []
+        worker.succeeded.connect(self.outcomes.append)
+        worker.failed.connect(self.failures.append)
 
 
 class BatchRecorder:
@@ -125,3 +149,52 @@ def test_image_prioritized_during_a_batch_is_detected_next(
     worker.run_batch(request)
     assert [path.name for path, _ in recorder.detected] == ["a.png", "c.png", "b.png"]
     assert recorder.summaries == [BatchDetectionSummary(detected_count=3, unreadable_paths=(), is_cancelled=False)]
+
+
+def test_single_detection_reads_the_image_file_on_the_worker(
+    worker: DetectionWorker, settings: DetectorSettings, tmp_path: Path
+) -> None:
+    recorder: RunRecorder = RunRecorder(worker)
+    worker.run(
+        DetectionRequest(settings=settings, image_path=_image(tmp_path, "a.png"), labeled_prompt=_labeled_prompt())
+    )
+    assert [outcome.result.image_size for outcome in recorder.outcomes] == [ImageSize(width=32, height=16)]
+    assert recorder.failures == []
+
+
+def test_unreadable_image_file_is_reported_as_unreadable(
+    worker: DetectionWorker, settings: DetectorSettings, tmp_path: Path
+) -> None:
+    broken_path: Path = tmp_path / "broken.jpg"
+    broken_path.write_bytes(b"not an image")
+    recorder: RunRecorder = RunRecorder(worker)
+    worker.run(DetectionRequest(settings=settings, image_path=broken_path, labeled_prompt=_labeled_prompt()))
+    assert recorder.outcomes == []
+    assert [failure.kind for failure in recorder.failures] == [DetectionFailureKind.UNREADABLE_IMAGE]
+
+
+def test_unexpected_error_of_a_single_detection_is_reported(
+    worker: DetectionWorker, settings: DetectorSettings, tmp_path: Path
+) -> None:
+    worker._session._detector = IndexErrorDetector(settings)
+    recorder: RunRecorder = RunRecorder(worker)
+    worker.run(
+        DetectionRequest(settings=settings, image_path=_image(tmp_path, "a.png"), labeled_prompt=_labeled_prompt())
+    )
+    assert recorder.failures == [
+        DetectionFailure(kind=DetectionFailureKind.DETECTION_ERROR, message="IndexError: query index out of range")
+    ]
+
+
+def test_unexpected_error_stops_the_batch_and_is_reported(
+    worker: DetectionWorker, settings: DetectorSettings, tmp_path: Path
+) -> None:
+    worker._session._detector = IndexErrorDetector(settings)
+    recorder: BatchRecorder = BatchRecorder(worker)
+    worker.run_batch(
+        BatchDetectionRequest(
+            settings=settings, labeled_prompt=_labeled_prompt(), image_paths=(_image(tmp_path, "a.png"),)
+        )
+    )
+    assert recorder.failures == ["a.png: IndexError: query index out of range"]
+    assert recorder.summaries == []

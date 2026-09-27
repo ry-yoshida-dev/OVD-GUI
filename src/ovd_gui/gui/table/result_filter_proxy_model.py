@@ -1,6 +1,8 @@
 from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QSortFilterProxyModel, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPalette
 
+from ...detection import DetectionRecord
+from ...review import ClassThresholds
 from .column_condition import ColumnCondition
 from .funnel_icon import FunnelIcon
 from .number_span import NumberSpan
@@ -16,8 +18,8 @@ class ResultFilterProxyModel(QSortFilterProxyModel):
     """
     Sorted view of a ``ResultRowModel`` listing only the rows passing a ``TableFilter``.
 
-    Every column header carries a funnel icon, filled while the column is filtered, and a tooltip naming its
-    condition.
+    Detections below the minimum confidence of their class are never listed, whatever the filter. The header of a
+    filtered column carries a filled funnel icon and a tooltip naming its condition; other headers carry no icon.
     """
 
     def __init__(self, source_model: ResultRowModel) -> None:
@@ -30,6 +32,7 @@ class ResultFilterProxyModel(QSortFilterProxyModel):
         super().__init__()
         self._source_model: ResultRowModel = source_model
         self._table_filter: TableFilter = TableFilter()
+        self._class_thresholds: ClassThresholds = ClassThresholds()
         self._funnel_icons: dict[bool, QIcon] = {}
         self.setSourceModel(source_model)
         self.setSortRole(ResultRowModel.SORT_ROLE)
@@ -62,6 +65,53 @@ class ResultFilterProxyModel(QSortFilterProxyModel):
         self._table_filter = table_filter
         self.endFilterChange(QSortFilterProxyModel.Direction.Rows)
         self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, len(ResultColumn) - 1)
+
+    @property
+    def class_thresholds(self) -> ClassThresholds:
+        """
+        Minimum confidence of each class.
+
+        Returns
+        -------
+        ClassThresholds
+            Thresholds in effect.
+        """
+        return self._class_thresholds
+
+    def set_class_thresholds(self, class_thresholds: ClassThresholds) -> None:
+        """
+        List only the detections reaching the minimum confidence of their class.
+
+        Parameters
+        ----------
+        class_thresholds : ClassThresholds
+            New thresholds.
+        """
+        if class_thresholds == self._class_thresholds:
+            return
+        self.beginFilterChange()
+        self._class_thresholds = class_thresholds
+        self.endFilterChange(QSortFilterProxyModel.Direction.Rows)
+
+    def is_above_minimum(self, row: ResultRow) -> bool:
+        """
+        Whether a row reaches the minimum confidence of its class.
+
+        Parameters
+        ----------
+        row : ResultRow
+            Row to test.
+
+        Returns
+        -------
+        bool
+            False for a detection below the minimum of its class; True for image status rows.
+        """
+        match row:
+            case DetectionRecord():
+                return self._class_thresholds.accepts(row.detection.class_name, row.detection.confidence)
+            case _:
+                return True
 
     def row_at(self, proxy_row: int) -> ResultRow:
         """
@@ -107,7 +157,9 @@ class ResultFilterProxyModel(QSortFilterProxyModel):
         """
         other_filter: TableFilter = self._table_filter.with_condition(column, None)
         texts: set[str] = {
-            ResultRowModel.cell_text(row, column) for row in self._source_model.rows if self._passes(row, other_filter)
+            self._source_model.cell_text(row, column)
+            for row in self._source_model.rows
+            if self._passes(row, other_filter)
         }
         condition: ColumnCondition | None = self._table_filter.condition_of(column)
         if isinstance(condition, ValueCondition):
@@ -139,22 +191,23 @@ class ResultFilterProxyModel(QSortFilterProxyModel):
         column: ResultColumn = ResultColumn(section)
         condition: ColumnCondition | None = self._table_filter.condition_of(column)
         if role == Qt.ItemDataRole.DecorationRole:
-            return self._funnel_icon(condition is not None)
+            return None if condition is None else self._funnel_icon(True)
         if role == Qt.ItemDataRole.ToolTipRole:
             if condition is None:
-                return f"Click the funnel to filter {column.header}"
+                return f"{column.header}: right-click to filter"
             return f"{column.header}: {condition.description}"
         return super().headerData(section, orientation, role)
 
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex | QPersistentModelIndex) -> bool:
         return self._passes(self._source_model.row_at(source_row), self._table_filter)
 
-    @staticmethod
-    def _passes(row: ResultRow, table_filter: TableFilter) -> bool:
+    def _passes(self, row: ResultRow, table_filter: TableFilter) -> bool:
+        if not self.is_above_minimum(row):
+            return False
         for column, condition in table_filter.conditions.items():
             match condition:
                 case ValueCondition():
-                    if not condition.accepts(ResultRowModel.cell_text(row, column)):
+                    if not condition.accepts(self._source_model.cell_text(row, column)):
                         return False
                 case RangeCondition():
                     if not condition.accepts(ResultRowModel.cell_number(row, column)):

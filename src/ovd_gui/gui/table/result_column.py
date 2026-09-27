@@ -6,14 +6,15 @@ class ResultColumn(Enum):
     Columns of the detection table, valued by their position.
     """
 
-    IMAGE = 0
-    CLASS = 1
-    QUERY = 2
-    CONFIDENCE = 3
-    X1 = 4
-    Y1 = 5
-    X2 = 6
-    Y2 = 7
+    ACCEPTED = 0
+    IMAGE = 1
+    CLASS = 2
+    QUERY = 3
+    CONFIDENCE = 4
+    X1 = 5
+    Y1 = 6
+    X2 = 7
+    Y2 = 8
 
     @property
     def header(self) -> str:
@@ -26,6 +27,8 @@ class ResultColumn(Enum):
             Short column title.
         """
         match self:
+            case ResultColumn.ACCEPTED:
+                return "Keep"
             case ResultColumn.IMAGE:
                 return "Image"
             case ResultColumn.CLASS:
@@ -44,6 +47,22 @@ class ResultColumn(Enum):
                 return "y2"
 
     @property
+    def header_label(self) -> str:
+        """
+        Text drawn in the header section, next to the funnel.
+
+        Returns
+        -------
+        str
+            ``header``, except a check mark for the narrow ``Keep`` check box column, named by its tool tip instead.
+        """
+        match self:
+            case ResultColumn.ACCEPTED:
+                return "✓"
+            case _:
+                return self.header
+
+    @property
     def is_numeric(self) -> bool:
         """
         Whether the column shows numbers, aligned to the right.
@@ -54,7 +73,7 @@ class ResultColumn(Enum):
             True for the confidence and box coordinates.
         """
         match self:
-            case ResultColumn.IMAGE | ResultColumn.CLASS | ResultColumn.QUERY:
+            case ResultColumn.ACCEPTED | ResultColumn.IMAGE | ResultColumn.CLASS | ResultColumn.QUERY:
                 return False
             case ResultColumn.CONFIDENCE | ResultColumn.X1 | ResultColumn.Y1 | ResultColumn.X2 | ResultColumn.Y2:
                 return True

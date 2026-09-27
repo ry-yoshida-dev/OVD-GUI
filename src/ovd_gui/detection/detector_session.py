@@ -3,6 +3,7 @@ from dataclasses import replace
 from time import perf_counter
 
 from open_vocabulary_detector import DetectionResult, DetectorSettings, OpenVocabularyDetector
+from PIL import Image
 
 from .detection_outcome import DetectionOutcome
 from .detection_request import DetectionRequest
@@ -50,14 +51,16 @@ class DetectorSession:
             return False
         return replace(loaded_settings, thresholds=settings.thresholds, batch_size=settings.batch_size) == settings
 
-    def detect(self, request: DetectionRequest) -> DetectionOutcome:
+    def detect(self, request: DetectionRequest, image: Image.Image) -> DetectionOutcome:
         """
         Run detection, loading the requested model first if needed.
 
         Parameters
         ----------
         request : DetectionRequest
-            Settings, image and prompt.
+            Settings, image file and prompt.
+        image : Image.Image
+            RGB pixels read from the request image file.
 
         Returns
         -------
@@ -67,7 +70,7 @@ class DetectorSession:
         is_model_reloaded: bool = not self.is_loaded_for(request.settings)
         detector: OpenVocabularyDetector = self._prepare(request.settings)
         started_at: float = perf_counter()
-        result: DetectionResult = detector.detect(request.image, request.labeled_prompt.prompt)
+        result: DetectionResult = detector.detect(image, request.labeled_prompt.prompt)
         return DetectionOutcome(
             request=request,
             result=result,

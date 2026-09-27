@@ -1,7 +1,7 @@
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPersistentModelIndex, Qt
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPersistentModelIndex, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication, QIcon, QPalette
 
 from ...detection import DetectionCatalog, DetectionRecord, PromptChange
@@ -22,13 +22,25 @@ class ResultRowModel(QAbstractTableModel):
     the result of an image keeps its place. Rows of the current image are highlighted. The image cell of an image
     detected with other classes than the current ones carries a warning icon, and its tool tip names the change.
     ``SORT_ROLE`` gives raw values so that numbers sort numerically and image names case-insensitively.
+
+    The ``Keep`` column of a detection is a check box telling whether the detection is exported; unchecking it
+    rejects the detection in the catalog of the listed results, and rejected rows are greyed out and struck through.
+
+    Signals
+    -------
+    acceptance_changed : Signal(Path)
+        Detections of an image were accepted or rejected.
     """
+
+    acceptance_changed: Signal = Signal(Path)
 
     SORT_ROLE: int = Qt.ItemDataRole.UserRole.value
     ROOT_INDEX: QModelIndex = QModelIndex()
     NUMERIC_ALIGNMENT: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
     MISSING_NUMBER: float = -1.0
     CURRENT_IMAGE_HIGHLIGHT_ALPHA: int = 70
+    KEPT_TEXT = "Kept"
+    REJECTED_TEXT = "Rejected"
 
     def __init__(self, palette: ClassPalette) -> None:
         """
@@ -41,6 +53,7 @@ class ResultRowModel(QAbstractTableModel):
         self._palette: ClassPalette = palette
         self._rows: list[ResultRow] = []
         self._image_paths: list[Path] = []
+        self._catalog: DetectionCatalog | None = None
         self._current_image_path: Path | None = None
         self._prompt_changes: dict[Path, PromptChange] = {}
         self._outdated_icon: QIcon = OutdatedIcon().to_icon()
@@ -54,7 +67,7 @@ class ResultRowModel(QAbstractTableModel):
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole) -> object:
         if orientation != Qt.Orientation.Horizontal or role != Qt.ItemDataRole.DisplayRole:
             return None
-        return ResultColumn(section).header
+        return ResultColumn(section).header_label
 
     def data(self, index: QModelIndex | QPersistentModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> object:
         if not index.isValid():
@@ -63,8 +76,12 @@ class ResultRowModel(QAbstractTableModel):
         column: ResultColumn = ResultColumn(index.column())
         if role == Qt.ItemDataRole.DisplayRole:
             return self._display_text(row, column)
+        if role == Qt.ItemDataRole.CheckStateRole and column == ResultColumn.ACCEPTED:
+            return self._check_state_of(row)
         if role == self.SORT_ROLE:
-            return self._sort_value(row, column)
+            return self._sort_value(row, column) if column != ResultColumn.ACCEPTED else self.cell_text(row, column)
+        if role == Qt.ItemDataRole.ToolTipRole and column == ResultColumn.ACCEPTED and isinstance(row, DetectionRecord):
+            return "Checked detections are exported; uncheck to reject this detection"
         if role == Qt.ItemDataRole.ToolTipRole and column == ResultColumn.IMAGE:
             return self._image_tool_tip(row.image_path)
         if role == Qt.ItemDataRole.DecorationRole and column == ResultColumn.IMAGE and self.is_outdated(row):
@@ -79,10 +96,95 @@ class ResultRowModel(QAbstractTableModel):
             case DetectionRecord():
                 if role == Qt.ItemDataRole.DecorationRole and column == ResultColumn.CLASS:
                     return self._palette.swatch_of(row.detection.class_id)
+                if role == Qt.ItemDataRole.ForegroundRole and not self.is_accepted(row):
+                    return QGuiApplication.palette().brush(QPalette.ColorRole.PlaceholderText)
             case ImageStatusRow():
                 if role == Qt.ItemDataRole.ForegroundRole:
                     return QGuiApplication.palette().brush(QPalette.ColorRole.PlaceholderText)
         return None
+
+    def flags(self, index: QModelIndex | QPersistentModelIndex) -> Qt.ItemFlag:
+        item_flags: Qt.ItemFlag = super().flags(index)
+        if (
+            index.isValid()
+            and index.column() == ResultColumn.ACCEPTED.value
+            and isinstance(self._rows[index.row()], DetectionRecord)
+        ):
+            item_flags |= Qt.ItemFlag.ItemIsUserCheckable
+        return item_flags
+
+    def setData(
+        self, index: QModelIndex | QPersistentModelIndex, value: object, role: int = Qt.ItemDataRole.EditRole
+    ) -> bool:
+        if not index.isValid() or index.column() != ResultColumn.ACCEPTED.value:
+            return False
+        if role != Qt.ItemDataRole.CheckStateRole or not isinstance(value, int | Qt.CheckState):
+            return False
+        row: ResultRow = self._rows[index.row()]
+        if not isinstance(row, DetectionRecord) or self._catalog is None:
+            return False
+        self.set_accepted((row,), Qt.CheckState(value) == Qt.CheckState.Checked)
+        return True
+
+    @property
+    def catalog(self) -> DetectionCatalog | None:
+        """
+        Results whose detections are listed.
+
+        Returns
+        -------
+        DetectionCatalog | None
+            ``None`` while no profile is shown.
+        """
+        return self._catalog
+
+    def is_accepted(self, row: ResultRow) -> bool:
+        """
+        Whether a row is kept for export.
+
+        Parameters
+        ----------
+        row : ResultRow
+            Row to test.
+
+        Returns
+        -------
+        bool
+            False for a rejected detection; True for other detections and for image status rows.
+        """
+        match row:
+            case DetectionRecord():
+                return self._catalog is None or self._catalog.is_accepted(row)
+            case ImageStatusRow():
+                return True
+
+    def set_accepted(self, records: Sequence[DetectionRecord], is_accepted: bool) -> None:
+        """
+        Accept or reject listed detections, updating their check boxes.
+
+        Parameters
+        ----------
+        records : Sequence[DetectionRecord]
+            Listed detections.
+        is_accepted : bool
+            True to accept them, False to reject them.
+
+        Raises
+        ------
+        RuntimeError
+            If no catalog is listed.
+        """
+        if self._catalog is None:
+            raise RuntimeError("no results are listed")
+        indices_by_image: dict[Path, list[int]] = {}
+        for record in records:
+            indices_by_image.setdefault(record.image_path, []).append(record.detection_index)
+        for image_path, detection_indices in indices_by_image.items():
+            self._catalog.set_accepted(image_path, detection_indices, is_accepted)
+            row_numbers: list[int] = self._row_numbers_of(image_path)
+            if row_numbers:
+                self.dataChanged.emit(self.index(row_numbers[0], 0), self.index(row_numbers[-1], len(ResultColumn) - 1))
+            self.acceptance_changed.emit(image_path)
 
     @property
     def rows(self) -> tuple[ResultRow, ...]:
@@ -220,10 +322,9 @@ class ResultRowModel(QAbstractTableModel):
             raise IndexError(f"row must be in [0, {len(self._rows)}). got {row}")
         return self._rows[row]
 
-    @staticmethod
-    def cell_text(row: ResultRow, column: ResultColumn) -> str:
+    def cell_text(self, row: ResultRow, column: ResultColumn) -> str:
         """
-        Text shown in one cell.
+        Text of one cell, as filtered by value.
 
         Parameters
         ----------
@@ -235,9 +336,11 @@ class ResultRowModel(QAbstractTableModel):
         Returns
         -------
         str
-            Displayed text; empty for a blank cell.
+            Displayed text; ``Kept`` or ``Rejected`` for the check box of a detection; empty for a blank cell.
         """
-        return ResultRowModel._display_text(row, column)
+        if column == ResultColumn.ACCEPTED and isinstance(row, DetectionRecord):
+            return self.KEPT_TEXT if self.is_accepted(row) else self.REJECTED_TEXT
+        return self._display_text(row, column)
 
     @staticmethod
     def cell_number(row: ResultRow, column: ResultColumn) -> float | None:
@@ -271,7 +374,7 @@ class ResultRowModel(QAbstractTableModel):
 
     def add_images(self, image_paths: Sequence[Path]) -> None:
         """
-        List newly opened images as not analyzed.
+        List newly opened images with their stored detections, or as not analyzed.
 
         Parameters
         ----------
@@ -280,7 +383,7 @@ class ResultRowModel(QAbstractTableModel):
         """
         for image_path in image_paths:
             if image_path not in self._image_paths:
-                self._replace_rows(image_path, (ImageStatusRow(image_path, AnalysisState.NOT_ANALYZED),))
+                self._replace_rows(image_path, self._rows_from(self._catalog, image_path))
 
     def replace_image(self, image_path: Path, records: Sequence[DetectionRecord]) -> None:
         """
@@ -305,6 +408,28 @@ class ResultRowModel(QAbstractTableModel):
         )
         self._replace_rows(image_path, new_rows)
 
+    def remove_images(self, image_paths: Sequence[Path]) -> None:
+        """
+        Stop listing some images.
+
+        Parameters
+        ----------
+        image_paths : Sequence[Path]
+            Images to remove; images not listed are ignored.
+        """
+        for image_path in image_paths:
+            if image_path not in self._image_paths:
+                continue
+            row_numbers: list[int] = self._row_numbers_of(image_path)
+            if row_numbers:
+                self.beginRemoveRows(QModelIndex(), row_numbers[0], row_numbers[-1])
+                del self._rows[row_numbers[0] : row_numbers[-1] + 1]
+                self.endRemoveRows()
+            self._image_paths.remove(image_path)
+            self._prompt_changes.pop(image_path, None)
+            if image_path == self._current_image_path:
+                self._current_image_path = None
+
     def show_catalog(self, catalog: DetectionCatalog | None) -> None:
         """
         List the detections stored in a catalog in place of the current rows.
@@ -316,6 +441,7 @@ class ResultRowModel(QAbstractTableModel):
             analyzed.
         """
         self.beginResetModel()
+        self._catalog = catalog
         self._rows = [row for image_path in self._image_paths for row in self._rows_from(catalog, image_path)]
         self._prompt_changes = {}
         self.endResetModel()
@@ -390,7 +516,15 @@ class ResultRowModel(QAbstractTableModel):
         font: QFont = QFont()
         font.setBold(self.is_current(row))
         font.setItalic(isinstance(row, ImageStatusRow))
+        font.setStrikeOut(not self.is_accepted(row))
         return font
+
+    def _check_state_of(self, row: ResultRow) -> Qt.CheckState | None:
+        match row:
+            case DetectionRecord():
+                return Qt.CheckState.Checked if self.is_accepted(row) else Qt.CheckState.Unchecked
+            case ImageStatusRow():
+                return None
 
     @staticmethod
     def _display_text(row: ResultRow, column: ResultColumn) -> str:
@@ -409,6 +543,8 @@ class ResultRowModel(QAbstractTableModel):
     @staticmethod
     def _record_text(record: DetectionRecord, column: ResultColumn) -> str:
         match column:
+            case ResultColumn.ACCEPTED:
+                return ""
             case ResultColumn.IMAGE:
                 return record.image_path.name
             case ResultColumn.CLASS:
@@ -433,6 +569,8 @@ class ResultRowModel(QAbstractTableModel):
     @staticmethod
     def _record_sort_value(record: DetectionRecord, column: ResultColumn) -> str | float:
         match column:
+            case ResultColumn.ACCEPTED:
+                return ""
             case ResultColumn.IMAGE:
                 return record.image_path.name.casefold()
             case ResultColumn.CLASS:

@@ -1,4 +1,5 @@
 from .analysis_state import AnalysisState
+from .column_auto_fit import ColumnAutoFit
 from .column_condition import ColumnCondition
 from .column_filter_popup import ColumnFilterPopup
 from .filter_header_view import FilterHeaderView
@@ -21,6 +22,7 @@ from .value_condition import ValueCondition
 
 __all__ = [
     "AnalysisState",
+    "ColumnAutoFit",
     "ColumnCondition",
     "ColumnFilterPopup",
     "FilterHeaderView",

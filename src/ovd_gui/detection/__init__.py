@@ -1,6 +1,9 @@
+from .background_queue import BackgroundQueue
 from .batch_detection_request import BatchDetectionRequest
 from .batch_detection_summary import BatchDetectionSummary
 from .detection_catalog import DetectionCatalog
+from .detection_failure import DetectionFailure
+from .detection_failure_kind import DetectionFailureKind
 from .detection_outcome import DetectionOutcome
 from .detection_record import DetectionRecord
 from .detection_request import DetectionRequest
@@ -19,9 +22,12 @@ from .reference_image import ReferenceImage
 from .result_library import ResultLibrary
 
 __all__ = [
+    "BackgroundQueue",
     "BatchDetectionRequest",
     "BatchDetectionSummary",
     "DetectionCatalog",
+    "DetectionFailure",
+    "DetectionFailureKind",
     "DetectionOutcome",
     "DetectionRecord",
     "DetectionRequest",

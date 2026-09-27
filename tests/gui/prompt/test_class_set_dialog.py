@@ -53,7 +53,7 @@ def test_search_matches_set_and_class_names(dialog: ClassSetDialog) -> None:
     assert dialog.listed_names == ("animals",)
     assert dialog.current_name == "animals"
     dialog._search_edit.setText("nothing")
-    assert dialog.listed_names == ()
+    assert list(dialog.listed_names) == []
     assert not _load_button_of(dialog).isEnabled()
 
 
@@ -69,7 +69,7 @@ def test_deleting_selects_the_next_set(dialog: ClassSetDialog, store: ClassSetSt
     assert dialog.listed_names == ("vehicles",)
     assert dialog.current_name == "vehicles"
     dialog.delete_class_set("vehicles")
-    assert dialog.listed_names == ()
+    assert list(dialog.listed_names) == []
     assert not dialog.preview.is_showing_content
 
 

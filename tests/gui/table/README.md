@@ -8,5 +8,5 @@ Tests of `ovd_gui.gui.table`.
 
 | Component | Description |
 | --------- | ----------- |
-| [test_result_panel.py](./test_result_panel.py) | Detection table: image status rows, current image highlight, funnel class filter, sorting, per-image replacement, showing a catalog and row selection. |
+| [test_result_panel.py](./test_result_panel.py) | Detection table: image status rows, current image highlight, funnels of filtered columns, the single Filter button, class filter, sorting, per-image replacement, showing a catalog, row selection, keeping and rejecting detections, class minimums and removed images. |
 | [test_profile_panel.py](./test_profile_panel.py) | Model table: rows per profile, selection and removal requests. |
