@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ovd-gui"
+version = "0.0.1"
+authors = [
+  { name = "Ryuto Yoshida" },
+]
+description = "Desktop GUI for open-vocabulary object detection with switchable model presets."
+readme = "README.md"
+requires-python = ">=3.12"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy",
+    "pillow",
+    "pyside6>=6.10",
+    "omegaconf>=2.3",
+    "open-vocabulary-detector @ git+https://github.com/ry-yoshida-dev/OpenVocabularyDetector.git",
+    "dataclass-initializer @ git+https://github.com/ry-yoshida-dev/DataclassInitializer.git",
+    "geometry @ git+https://github.com/ry-yoshida-dev/Geometry.git",
+    "object-detection-format @ git+https://github.com/ry-yoshida-dev/ObjectDetectionFormat.git",
+]
+
+[project.scripts]
+ovd-gui = "ovd_gui.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/ry-yoshida-dev/OVD-GUI"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "mypy", "basedpyright", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ovd_gui = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.mypy]
+strict = true
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["omegaconf.*", "dataclass_initializer.*"]
+ignore_missing_imports = true
+
+[tool.pyright]
+include = ["src"]
+typeCheckingMode = "strict"
+reportUnknownMemberType = false
+reportMissingTypeStubs = false
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
