@@ -21,7 +21,7 @@ dependencies = [
     "pillow",
     "pyside6>=6.10",
     "omegaconf>=2.3",
-    "open-vocabulary-detector @ git+https://github.com/ry-yoshida-dev/OpenVocabularyDetector.git@f06abc54ee914d94dae5a4dfc98617fd38e6a6ab",
+    "open-vocabulary-detector @ git+https://github.com/ry-yoshida-dev/OpenVocabularyDetector.git@6e2300c7e7cc75c97b09e34cda9eefef71b6029e",
     "dataclass-initializer @ git+https://github.com/ry-yoshida-dev/DataclassInitializer.git@5d0bb066910df526e3478a71db1cbe3bdb3e1b98",
     "geometry @ git+https://github.com/ry-yoshida-dev/Geometry.git@7a019d2696877c2beff959d8bb4b2e1efc9880c1",
     "object-detection-format @ git+https://github.com/ry-yoshida-dev/ObjectDetectionFormat.git@f5edaa53c41c5b9b3db1ed9bbee49af8d14853ce",

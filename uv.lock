@@ -970,7 +970,7 @@ wheels = [
 [[package]]
 name = "open-vocabulary-detector"
 version = "0.0.1"
-source = { git = "https://github.com/ry-yoshida-dev/OpenVocabularyDetector.git?rev=f06abc54ee914d94dae5a4dfc98617fd38e6a6ab#f06abc54ee914d94dae5a4dfc98617fd38e6a6ab" }
+source = { git = "https://github.com/ry-yoshida-dev/OpenVocabularyDetector.git?rev=6e2300c7e7cc75c97b09e34cda9eefef71b6029e#6e2300c7e7cc75c97b09e34cda9eefef71b6029e" }
 dependencies = [
     { name = "geometry" },
     { name = "numpy" },
@@ -1012,7 +1012,7 @@ requires-dist = [
     { name = "numpy" },
     { name = "object-detection-format", git = "https://github.com/ry-yoshida-dev/ObjectDetectionFormat.git?rev=f5edaa53c41c5b9b3db1ed9bbee49af8d14853ce" },
     { name = "omegaconf", specifier = ">=2.3" },
-    { name = "open-vocabulary-detector", git = "https://github.com/ry-yoshida-dev/OpenVocabularyDetector.git?rev=f06abc54ee914d94dae5a4dfc98617fd38e6a6ab" },
+    { name = "open-vocabulary-detector", git = "https://github.com/ry-yoshida-dev/OpenVocabularyDetector.git?rev=6e2300c7e7cc75c97b09e34cda9eefef71b6029e" },
     { name = "pillow" },
     { name = "pyside6", specifier = ">=6.10" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
