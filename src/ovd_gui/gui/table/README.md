@@ -19,8 +19,8 @@ are not listed.
 
 | Component | Description |
 | --------- | ----------- |
-| [profile_panel.py](./profile_panel.py) | `ProfilePanel`: model table with options, image, outdated image and detection counts per profile; selecting a row shows its results, Remove forgets them. |
-| [profile_column.py](./profile_column.py) | `ProfileColumn`: columns of the model table. |
+| [profile_panel.py](./profile_panel.py) | `ProfilePanel`: model table with backend, model, device, precision, thresholds, image, outdated image and detection counts per profile; selecting a row shows its results, Remove forgets them. |
+| [profile_column.py](./profile_column.py) | `ProfileColumn`: columns of the model table with their headers and cell texts. |
 | [result_panel.py](./result_panel.py) | `ResultPanel`: detection table with a filter per column, class minimums, keeping and rejecting detections, saving the listed detections as CSV, Clear Filters and Update Outdated buttons; selecting a row reports its detection or image, and new results or filters never move the selection to another image. |
 | [result_row_model.py](./result_row_model.py) | `ResultRowModel`: rows per open image with keep check box, image, class, matched query, confidence and box columns; highlights the current image, marks outdated images and greys out rejected detections. |
 | [result_filter_proxy_model.py](./result_filter_proxy_model.py) | `ResultFilterProxyModel`: sorted view listing the rows passing a `TableFilter` and the class minimums; supplies the funnels of filtered headers and the values to filter by. |

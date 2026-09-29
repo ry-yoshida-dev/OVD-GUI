@@ -44,7 +44,7 @@ def test_profile_ignores_batch_size_but_not_model_or_thresholds() -> None:
     assert DetectorProfile.of(replace(SETTINGS, weights_path="yolov8l-worldv2.pt")) != profile
     assert DetectorProfile.of(replace(SETTINGS, thresholds=DetectionThresholds(0.1, None))) != profile
     assert profile.model_name == "yolov8s-worldv2"
-    assert profile.options_text == "cpu · fp32 · conf 0.25 · NMS 0.70"
+    assert profile.options_text == "yolo_world · cpu · fp32 · conf 0.25 · NMS 0.70"
     assert DetectorProfile.of(replace(SETTINGS, weights_path="IDEA-Research/grounding-dino-tiny")).model_name == (
         "grounding-dino-tiny"
     )

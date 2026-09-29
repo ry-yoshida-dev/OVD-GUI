@@ -68,16 +68,53 @@ class DetectorProfile:
         return PurePosixPath(self.weights_path).stem
 
     @property
-    def options_text(self) -> str:
+    def precision_text(self) -> str:
         """
-        Device, precision and thresholds in one line.
+        Floating-point precision the model ran in.
 
         Returns
         -------
         str
-            E.g. ``"auto · fp32 · conf 0.25 · NMS 0.70"``.
+            ``"fp16"`` or ``"fp32"``.
         """
-        precision: str = "fp16" if self.is_half_precision_enabled else "fp32"
+        return "fp16" if self.is_half_precision_enabled else "fp32"
+
+    @property
+    def confidence_text(self) -> str:
+        """
+        Confidence threshold with two decimals.
+
+        Returns
+        -------
+        str
+            E.g. ``"0.25"``.
+        """
+        return f"{self.thresholds.confidence_threshold:.2f}"
+
+    @property
+    def nms_text(self) -> str:
+        """
+        NMS IoU threshold with two decimals.
+
+        Returns
+        -------
+        str
+            E.g. ``"0.70"``, or ``"off"`` when NMS is disabled.
+        """
         nms_iou_threshold: float | None = self.thresholds.nms_iou_threshold
-        nms_text: str = "off" if nms_iou_threshold is None else f"{nms_iou_threshold:.2f}"
-        return f"{self.device.value} · {precision} · conf {self.thresholds.confidence_threshold:.2f} · NMS {nms_text}"
+        return "off" if nms_iou_threshold is None else f"{nms_iou_threshold:.2f}"
+
+    @property
+    def options_text(self) -> str:
+        """
+        Backend, device, precision and thresholds in one line.
+
+        Returns
+        -------
+        str
+            E.g. ``"yolo_world · auto · fp32 · conf 0.25 · NMS 0.70"``.
+        """
+        return (
+            f"{self.backend.value} · {self.device.value} · {self.precision_text} · conf {self.confidence_text}"
+            + f" · NMS {self.nms_text}"
+        )

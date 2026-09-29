@@ -148,6 +148,9 @@ class ProfilePanel(QWidget):
     def _build_tree(self) -> None:
         self._tree.setColumnCount(len(ProfileColumn))
         self._tree.setHeaderLabels([column.header for column in ProfileColumn])
+        header_item: QTreeWidgetItem = self._tree.headerItem()
+        for column in ProfileColumn:
+            header_item.setToolTip(column.value, column.header_tool_tip)
         self._tree.setRootIsDecorated(False)
         self._tree.setUniformRowHeights(True)
         self._tree.setAlternatingRowColors(True)
@@ -176,16 +179,8 @@ class ProfilePanel(QWidget):
         self._remove_action.triggered.connect(self._request_removal)
 
     def _item_of(self, summary: ProfileSummary) -> QTreeWidgetItem:
-        item: QTreeWidgetItem = QTreeWidgetItem(
-            [
-                summary.profile.model_name,
-                summary.profile.options_text,
-                str(summary.image_count),
-                str(summary.outdated_image_count) if summary.outdated_image_count else "",
-                str(summary.detection_count),
-            ]
-        )
-        item.setToolTip(ProfileColumn.MODEL.value, f"{summary.profile.backend.value}: {summary.profile.weights_path}")
+        item: QTreeWidgetItem = QTreeWidgetItem([column.text_of(summary) for column in ProfileColumn])
+        item.setToolTip(ProfileColumn.MODEL.value, summary.profile.weights_path)
         if summary.outdated_image_count:
             item.setIcon(ProfileColumn.OUTDATED.value, OutdatedIcon().to_icon())
             item.setToolTip(
@@ -193,7 +188,7 @@ class ProfilePanel(QWidget):
                 f"{summary.outdated_image_count} of {summary.image_count} images were detected with other classes",
             )
         for column in ProfileColumn:
-            if column.is_numeric:
+            if column.is_right_aligned:
                 item.setTextAlignment(column.value, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         return item
 

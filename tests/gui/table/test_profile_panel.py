@@ -37,13 +37,17 @@ def _tree(panel: ProfilePanel) -> QTreeWidget:
     return tree
 
 
-def test_rows_show_model_options_and_counts_with_the_shown_profile_selected(panel: ProfilePanel) -> None:
+def test_rows_show_backend_model_options_and_counts_with_the_shown_profile_selected(panel: ProfilePanel) -> None:
     tree: QTreeWidget = _tree(panel)
     first_row: QTreeWidgetItem | None = tree.topLevelItem(0)
     assert first_row is not None
     assert [first_row.text(column.value) for column in ProfileColumn] == [
+        "yolo_world",
         "yolov8s-worldv2",
-        "cpu · fp32 · conf 0.25 · NMS off",
+        "cpu",
+        "fp32",
+        "0.25",
+        "off",
         "3",
         "",
         "7",
