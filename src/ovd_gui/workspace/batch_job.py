@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
-from ...detection import BatchDetectionRequest
-from ...export import ExportOptions
+from ..detection import BatchDetectionRequest
+from ..export import ExportOptions
 from .batch_purpose import BatchPurpose
 
 

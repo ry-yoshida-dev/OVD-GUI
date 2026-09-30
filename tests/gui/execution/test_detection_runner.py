@@ -28,8 +28,9 @@ from ovd_gui.detection import (
     LabeledPrompt,
     ReferenceBoard,
 )
-from ovd_gui.gui.execution import BatchJob, DetectionRunner
+from ovd_gui.gui.execution import DetectionRunner
 from ovd_gui.vocabulary import ClassDefinition
+from ovd_gui.workspace import BatchJob
 
 _FAILING_WIDTH: int = 13
 

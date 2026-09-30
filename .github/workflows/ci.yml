@@ -38,5 +38,35 @@ jobs:
       - name: basedpyright
         run: uv run basedpyright
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
       - name: Tests
         run: uv run pytest -q
+
+  web-without-qt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies without extras
+        run: uv sync --locked
+
+      - name: Web interface imports without PySide6
+        run: >-
+          uv run --no-sync python -c
+          "import importlib.util, ovd_gui.__main__, ovd_gui.web;
+          assert importlib.util.find_spec('PySide6') is None"

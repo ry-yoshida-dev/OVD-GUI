@@ -2,7 +2,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QProgressDialog, QWidget
 
 from ...detection import BatchDetectionSummary
-from .batch_job import BatchJob
+from ...workspace import BatchJob
 from .detection_runner import DetectionRunner
 
 

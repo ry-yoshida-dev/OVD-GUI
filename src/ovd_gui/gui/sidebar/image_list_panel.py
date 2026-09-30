@@ -2,12 +2,11 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, Qt, Signal
-from PySide6.QtGui import QAction, QIcon, QKeySequence
+from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence
 from PySide6.QtWidgets import QAbstractItemView, QListWidget, QListWidgetItem, QMenu, QWidget
 
+from ...workspace import ImageState, ImageStatus
 from .image_count_delegate import ImageCountDelegate
-from .image_state import ImageState
-from .image_status import ImageStatus
 from .status_dot_icon import StatusDotIcon
 
 
@@ -43,7 +42,7 @@ class ImageListPanel(QListWidget):
         self._image_paths: list[Path] = []
         self._statuses: dict[Path, ImageStatus] = {}
         self._state_icons: dict[ImageState, QIcon] = {
-            state: StatusDotIcon(state.color, state.is_marked_filled).to_icon() for state in ImageState
+            state: StatusDotIcon(QColor(state.color), state.is_marked_filled).to_icon() for state in ImageState
         }
         self._remove_action: QAction = QAction("Close Selected Images", self)
         self._remove_action.setShortcuts(

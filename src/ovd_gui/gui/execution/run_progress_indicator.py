@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QHBoxLayout, QProgressBar, QToolButton, QWidget
 
-from .batch_job import BatchJob
+from ...workspace import BatchJob
 from .detection_runner import DetectionRunner
 
 

@@ -1,37 +1,26 @@
+import importlib.util
 import sys
-from pathlib import Path
 
-from PySide6.QtWidgets import QApplication
-
-from .detection import DeviceAvailability
-from .gui import MainWindow
-from .preset import PresetCatalog
-from .storage import ClassSetStore, ClassThresholdStore, ResultStore, SessionStore
-from .vocabulary import ClassListStore
+from .cli import CommandLine, InterfaceKind, LaunchOptions
 
 
 def main() -> None:
     """
-    Launch the GUI; image files or directories given as arguments are opened at start, otherwise the images open
-    when the window last closed.
+    Start the web interface, or the desktop window with ``--qt``; image files or directories given as arguments are
+    opened at start, otherwise the images open at the end of the last session.
     """
-    application: QApplication = QApplication(sys.argv)
-    window: MainWindow = MainWindow(
-        PresetCatalog.from_package(),
-        ClassListStore.in_working_directory(),
-        ClassSetStore.in_working_directory(),
-        DeviceAvailability.detect(),
-        ResultStore.in_working_directory(),
-        ClassThresholdStore.in_working_directory(),
-        SessionStore.in_working_directory(),
-    )
-    window.show()
-    argument_paths: list[Path] = [Path(argument) for argument in sys.argv[1:]]
-    if argument_paths:
-        window.open_paths(argument_paths)
-    else:
-        window.restore_session()
-    sys.exit(application.exec())
+    options: LaunchOptions = CommandLine().parse(sys.argv[1:])
+    match options.interface:
+        case InterfaceKind.WEB:
+            from .web import WebLauncher
+
+            WebLauncher(options.host, options.port, options.is_browser_opened).run(options.paths)
+        case InterfaceKind.QT:
+            if importlib.util.find_spec("PySide6") is None:
+                sys.exit('The desktop window needs PySide6: pip install "ovd-gui[qt]"')
+            from .gui import QtLauncher
+
+            sys.exit(QtLauncher().run(options.paths))
 
 
 if __name__ == "__main__":

@@ -4,7 +4,8 @@
 
 Application data kept in `ovd_gui_data/` under the working directory: named class sets with their image prompts,
 the detection results of every model with the rejected detections, the minimum confidence of each class, and the
-images open when the window last closed.
+images open when the application last closed. Images uploaded from a browser are kept in `uploads/` by the
+`UploadStore` of [workspace](../workspace/README.md).
 
 A class set is one self-contained ZIP archive (`.ovdset`) that stores the pixels of each reference image losslessly,
 so it does not depend on where the original image files were and can be copied to another machine. Reference images
@@ -24,7 +25,8 @@ ovd_gui_data/
 │   ├── manifest.json        # profiles, images with boxes and rejections, prompts with labels and signatures
 │   └── images/<sha256>.png  # pixels of the reference images used by visual queries
 ├── class_thresholds.json    # default and per-class minimum confidence
-└── session.json             # open image files and the shown one
+├── session.json             # open image files and the shown one
+└── uploads/                 # image files uploaded from a browser, with their dropped folder structure
 ```
 
 ## Components

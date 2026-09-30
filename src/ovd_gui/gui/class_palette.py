@@ -1,31 +1,14 @@
 from PySide6.QtGui import QColor, QIcon, QPixmap
 
+from ..media import ClassColors
+
 
 class ClassPalette:
     """
     Distinct, stable colors for class ids.
     """
 
-    HEX_COLORS: tuple[str, ...] = (
-        "#e6194b",
-        "#3cb44b",
-        "#4363d8",
-        "#f58231",
-        "#911eb4",
-        "#42d4f4",
-        "#f032e6",
-        "#bfef45",
-        "#fabed4",
-        "#469990",
-        "#dcbeff",
-        "#9a6324",
-        "#fffac8",
-        "#800000",
-        "#aaffc3",
-        "#808000",
-        "#ffd8b1",
-        "#000075",
-    )
+    HEX_COLORS: tuple[str, ...] = ClassColors.HEX_COLORS
     SWATCH_SIZE = 12
 
     def color_of(self, class_id: int) -> QColor:

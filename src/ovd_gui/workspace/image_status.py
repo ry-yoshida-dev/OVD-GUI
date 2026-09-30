@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from ...detection import DetectionCatalog, DetectionRecord
-from ...review import ClassThresholds
+from ..detection import DetectionCatalog, DetectionRecord
+from ..review import ClassThresholds
 from .image_state import ImageState
 
 

@@ -1,7 +1,5 @@
 from enum import Enum
 
-from PySide6.QtGui import QColor
-
 
 class ImageState(Enum):
     """
@@ -14,24 +12,24 @@ class ImageState(Enum):
     FAILED = "failed"
 
     @property
-    def color(self) -> QColor:
+    def color(self) -> str:
         """
         Color of the dot marking the state in the image list.
 
         Returns
         -------
-        QColor
-            Grey, green, amber or red.
+        str
+            Grey, green, amber or red as ``#rrggbb``.
         """
         match self:
             case ImageState.NOT_ANALYZED:
-                return QColor(150, 150, 150)
+                return "#969696"
             case ImageState.DETECTED:
-                return QColor(60, 170, 90)
+                return "#3caa5a"
             case ImageState.OUTDATED:
-                return QColor(232, 160, 32)
+                return "#e8a020"
             case ImageState.FAILED:
-                return QColor(215, 60, 60)
+                return "#d73c3c"
 
     @property
     def is_marked_filled(self) -> bool:

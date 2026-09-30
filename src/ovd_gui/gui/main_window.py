@@ -51,12 +51,13 @@ from ..preset import PresetCatalog
 from ..review import ClassThresholds
 from ..storage import ClassSetStore, ClassThresholdStore, ResultStore, Session, SessionStore
 from ..vocabulary import ClassDefinition, ClassListStore
+from ..workspace import BatchJob, BatchPurpose, ImageStatus
 from .class_palette import ClassPalette
-from .execution import BatchJob, BatchProgressDialog, BatchPurpose, DetectionRunner, RunProgressIndicator
+from .execution import BatchProgressDialog, DetectionRunner, RunProgressIndicator
 from .export_dialog import ExportDialog
 from .intake import DropOverlay, DropZone
 from .prompt import ClassEditor
-from .sidebar import CollapsibleSection, ImageListPanel, ImageStatus, SectionStack, SettingsPanel
+from .sidebar import CollapsibleSection, ImageListPanel, SectionStack, SettingsPanel
 from .statistics import StatisticsWindow
 from .table import ProfilePanel, ResultPanel
 from .viewer import DetectionOverlay, DisplayMenu, ImageCanvas

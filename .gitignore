@@ -8,3 +8,5 @@ __pycache__/
 .DS_Store
 *.pt
 ovd_gui_data/
+frontend/node_modules/
+src/ovd_gui/web/static/

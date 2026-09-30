@@ -5,9 +5,10 @@ from open_vocabulary_detector import DetectionResult, ImageSize, Prompt, PromptK
 from PySide6.QtWidgets import QApplication
 
 from ovd_gui.detection import DetectionCatalog, LabeledPrompt, ReferenceBoard
-from ovd_gui.gui.sidebar import ImageCountDelegate, ImageListPanel, ImageState, ImageStatus
+from ovd_gui.gui.sidebar import ImageCountDelegate, ImageListPanel
 from ovd_gui.review import ClassThresholds
 from ovd_gui.vocabulary import ClassDefinition
+from ovd_gui.workspace import ImageState, ImageStatus
 
 PATHS: tuple[Path, ...] = tuple(Path(f"image{index}.png") for index in range(4))
 

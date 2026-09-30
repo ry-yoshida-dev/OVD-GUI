@@ -8,7 +8,7 @@ version = "0.0.1"
 authors = [
   { name = "Ryuto Yoshida" },
 ]
-description = "Desktop GUI for open-vocabulary object detection with switchable model presets."
+description = "Web and desktop GUI for open-vocabulary object detection with switchable model presets."
 readme = "README.md"
 requires-python = ">=3.12"
 classifiers = [
@@ -19,7 +19,9 @@ classifiers = [
 dependencies = [
     "numpy",
     "pillow",
-    "pyside6>=6.10",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
     "omegaconf>=2.3",
     "open-vocabulary-detector @ git+https://github.com/ry-yoshida-dev/OpenVocabularyDetector.git@6e2300c7e7cc75c97b09e34cda9eefef71b6029e",
     "dataclass-initializer @ git+https://github.com/ry-yoshida-dev/DataclassInitializer.git@5d0bb066910df526e3478a71db1cbe3bdb3e1b98",
@@ -34,13 +36,14 @@ ovd-gui = "ovd_gui.__main__:main"
 Homepage = "https://github.com/ry-yoshida-dev/OVD-GUI"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "mypy", "basedpyright", "ruff"]
+qt = ["pyside6>=6.10"]
+dev = ["pytest>=8.0", "mypy", "basedpyright", "ruff", "httpx", "pyside6>=6.10"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-ovd_gui = ["py.typed"]
+ovd_gui = ["py.typed", "web/static/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -66,3 +69,4 @@ target-version = "py312"
 
 [tool.ruff.lint.per-file-ignores]
 "src/ovd_gui/gui/execution/detection_worker.py" = ["BLE001"]
+"src/ovd_gui/workspace/detection_engine.py" = ["BLE001"]

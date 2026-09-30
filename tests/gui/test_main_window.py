@@ -22,13 +22,12 @@ from PySide6.QtWidgets import QApplication, QMessageBox, QTableView
 from ovd_gui.detection import DetectionOutcome, DetectorProfile, DeviceAvailability, ReferenceBox, ReferenceImage
 from ovd_gui.export import ExportOptions, ExportScope
 from ovd_gui.gui import MainWindow
-from ovd_gui.gui.execution import BatchJob
-from ovd_gui.gui.sidebar import ImageState, ImageStatus
 from ovd_gui.gui.table import AnalysisState, ImageStatusRow, ProfilePanel, ResultColumn, ResultPanel, ValueCondition
 from ovd_gui.preset import PresetCatalog
 from ovd_gui.review import ClassThresholds
 from ovd_gui.storage import ClassSetStore, ClassThresholdStore, ResultStore, SessionStore
 from ovd_gui.vocabulary import ClassDefinition, ClassListStore
+from ovd_gui.workspace import BatchJob, ImageState, ImageStatus
 
 _REFERENCE_IMAGE: ReferenceImage = ReferenceImage.of("a.jpg", Image.new("RGB", (10, 10)))
 

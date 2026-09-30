@@ -11,7 +11,7 @@ from ...detection import (
     DetectionRequest,
     DetectorProfile,
 )
-from .batch_job import BatchJob
+from ...workspace import BatchJob
 from .detection_worker import DetectionWorker
 
 
